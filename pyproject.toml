@@ -3,6 +3,7 @@ name = "hbicproc-pipeline"
 version = "0.1.0"
 description = "Minimal fMRI preprocessing workflow orchestrator."
 requires-python = ">=3.8"
+dependencies = ["prompt_toolkit>=3.0"]
 
 [project.scripts]
 pipeline = "pipeline.cli:main"
