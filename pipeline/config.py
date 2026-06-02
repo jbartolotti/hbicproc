@@ -20,7 +20,7 @@ def load_config(path="pipeline_config.json"):
 def _apply_defaults(config):
     defaults = {
         "study_root": ".",
-        "log_dir": "logs",
+        "log_dir": "",
         "xnat": {
             "script_path": "scripts/xnat_download.R",
             "output_dir": "sourcedata"
@@ -60,6 +60,8 @@ def _resolve_paths(config, root_dir):
         study_root = (root_dir / study_root).resolve()
 
     config["study_root"] = str(study_root)
+    if not config.get("log_dir"):
+        config["log_dir"] = str(Path(config["bidskit"]["output_dir"]) / "logs")
     config["log_dir"] = str(_resolve_path(config["log_dir"], root_dir, study_root))
 
     for section in ["xnat", "bidskit", "mriqc", "fmriprep"]:

@@ -5,18 +5,14 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 try:
-    from prompt_toolkit.shortcuts import button_dialog, input_dialog, radiolist_dialog
-    from prompt_toolkit.styles import Style
-    PROMPT_TOOLKIT_AVAILABLE = True
+    import questionary
+    QUESTIONARY_AVAILABLE = True
 except ImportError:
-    PROMPT_TOOLKIT_AVAILABLE = False
+    QUESTIONARY_AVAILABLE = False
 
-BIDS_DIR_OPTIONS = ["anat", "func", "fmap", "dwi", "unknown"]
-DEFAULT_STYLE = Style.from_dict({
-    "dialog": "bg:#202020",
-    "button": "bg:#008800 #ffffff",
-    "button.focused": "bg:#00ff00 #000000",
-}) if PROMPT_TOOLKIT_AVAILABLE else None
+BIDS_DIR_OPTIONS = ["EXCLUDE_BIDS_Directory", "anat", "func", "fmap", "dwi"]
+EXCLUDE_BIDS_NAME = "EXCLUDE_BIDS_Name"
+UNASSIGNED = "UNASSIGNED"
 
 
 def load_protocol(file_path: str) -> Dict[str, List[str]]:
@@ -39,10 +35,13 @@ def summarize_sequences(data: Dict[str, List[str]]) -> List[str]:
 def suggest_labels(sequence_name: str, all_sequence_names: List[str]) -> Dict[str, str]:
     lower = sequence_name.lower()
     hints = {
-        "bids_dir": "unknown",
-        "bids_name": "",
-        "intended_for": "",
+        "bids_dir": "EXCLUDE_BIDS_Directory",
+        "bids_name": EXCLUDE_BIDS_NAME,
+        "intended_for": UNASSIGNED,
     }
+
+    if "aahead" in lower or "aahead" in lower or "scout" in lower or "localizer" in lower:
+        return hints
 
     anat_tokens = ["mprage", "t1", "t2", "anat", "mpr", "sag", "t1w", "t2w"]
     func_tokens = ["bold", "fmri", "rest", "nback", "flanker", "task", "functional"]
@@ -51,7 +50,7 @@ def suggest_labels(sequence_name: str, all_sequence_names: List[str]) -> Dict[st
 
     if any(token in lower for token in anat_tokens) and not any(token in lower for token in func_tokens):
         hints["bids_dir"] = "anat"
-        hints["bids_name"] = "T2w" if "t2" in lower else "T1w"
+        hints["bids_name"] = "T1w" if "mprage" in lower or "t1" in lower else "T1w"
 
     elif any(token in lower for token in dwi_tokens):
         hints["bids_dir"] = "dwi"
@@ -59,12 +58,7 @@ def suggest_labels(sequence_name: str, all_sequence_names: List[str]) -> Dict[st
 
     elif any(token in lower for token in fmap_tokens):
         hints["bids_dir"] = "fmap"
-        if "phasediff" in lower or "phase" in lower:
-            hints["bids_name"] = "phasediff"
-        elif "magnitude" in lower:
-            hints["bids_name"] = "magnitude1"
-        else:
-            hints["bids_name"] = "phasediff"
+        hints["bids_name"] = infer_fieldmap_name(lower)
         hints["intended_for"] = suggest_intended_for(sequence_name, all_sequence_names)
 
     elif any(token in lower for token in func_tokens):
@@ -88,21 +82,35 @@ def infer_task_label(sequence_name: str) -> str:
     return common[0] if common else "unknown"
 
 
+def infer_fieldmap_name(lower_sequence_name: str) -> str:
+    if "ap" in lower_sequence_name:
+        return "dir-AP_epi"
+    if "pa" in lower_sequence_name:
+        return "dir-PA_epi"
+    if "phasediff" in lower_sequence_name or "phase" in lower_sequence_name:
+        return "dir-AP_epi"
+    return "dir-PA_epi"
+
+
 def suggest_intended_for(sequence_name: str, all_sequence_names: List[str]) -> str:
     func_candidates = [name for name in all_sequence_names if any(tok in name.lower() for tok in ["bold", "fmri", "rest", "nback", "flanker"])]
     if not func_candidates:
-        return ""
+        return UNASSIGNED
+
+    lower = sequence_name.lower()
+    if "nback" in lower:
+        return "task-nback_bold"
+    if "flanker" in lower:
+        return "task-flanker_bold"
+    if "rest" in lower:
+        return "task-rest_bold"
 
     source_tokens = set(tokenize_name(sequence_name))
-    best_match = ""
-    best_score = 0
-    for candidate in func_candidates:
-        score = len(source_tokens.intersection(set(tokenize_name(candidate))))
-        if score > best_score:
-            best_score = score
-            best_match = candidate
-
-    return best_match or func_candidates[0]
+    candidate_labels = [f"task-{infer_task_label(name)}_bold" for name in func_candidates]
+    candidate_labels = [label for label in candidate_labels if label != "task-unknown_bold"]
+    if candidate_labels:
+        return candidate_labels[0]
+    return UNASSIGNED
 
 
 def tokenize_name(name: str) -> List[str]:
@@ -113,88 +121,105 @@ def run_annotation_ui(protocol_data: Dict[str, List[str]]) -> Dict[str, List[str
     sequence_names = list(protocol_data.keys())
     entries = []
     for sequence_name, values in protocol_data.items():
-        bids_dir, bids_name, intended_for = (values + ["", "", ""])[:3]
-        if bids_dir in {"EXCLUDE_BIDS_Directory", "UNASSIGNED"}:
-            bids_dir = "unknown"
-        if bids_name in {"EXCLUDE_BIDS_Name", "UNASSIGNED"}:
-            bids_name = ""
-        entries.append(
-            {
-                "sequence_name": sequence_name,
-                "bids_dir": bids_dir,
-                "bids_name": bids_name,
-                "intended_for": intended_for,
-            }
-        )
+        bids_dir, bids_name, intended_for = (values + [EXCLUDE_BIDS_NAME, UNASSIGNED])[:3]
+        if bids_dir not in BIDS_DIR_OPTIONS:
+            bids_dir = "EXCLUDE_BIDS_Directory"
+        if bids_name == "" or bids_name == "UNASSIGNED":
+            bids_name = EXCLUDE_BIDS_NAME
+        if intended_for == "" or intended_for is None:
+            intended_for = UNASSIGNED
 
-    for entry in entries:
-        if entry["bids_dir"] == "unknown" or not entry["bids_name"]:
-            entry.update(suggest_labels(entry["sequence_name"], sequence_names))
+        entry = {
+            "sequence_name": sequence_name,
+            "bids_dir": bids_dir,
+            "bids_name": bids_name,
+            "intended_for": intended_for,
+        }
+        if bids_dir == "EXCLUDE_BIDS_Directory" and bids_name == EXCLUDE_BIDS_NAME and intended_for == UNASSIGNED:
+            entry.update(suggest_labels(sequence_name, sequence_names))
+        entries.append(entry)
 
-    if PROMPT_TOOLKIT_AVAILABLE:
-        return _run_prompt_toolkit_ui(entries)
+    if QUESTIONARY_AVAILABLE:
+        return _run_questionary_ui(entries)
     return _run_text_ui(entries)
 
 
-def _run_prompt_toolkit_ui(entries: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+def _run_questionary_ui(entries: List[Dict[str, Any]]) -> Dict[str, List[str]]:
     total = len(entries)
     current_index = 0
 
     while True:
         entry = entries[current_index]
-        title = f"Sequence {current_index + 1} of {total}: {entry['sequence_name']}"
-        message = (
-            f"bids_dir: {entry['bids_dir']}\n"
-            f"bids_name: {entry['bids_name']}\n"
-            f"intended_for: {entry['intended_for'] or '<none>'}\n\n"
-            "Select an action to update this sequence or move to another one."
-        )
-        buttons = [
-            ("Edit bids_dir", "edit_dir"),
-            ("Edit bids_name", "edit_name"),
-            ("Edit intended_for", "edit_intended"),
-            ("Previous sequence", "previous"),
-            ("Next sequence", "next"),
-            ("Save and exit", "save"),
-            ("Quit without saving", "quit"),
-        ]
+        print(f"\nSequence {current_index + 1} of {total}: {entry['sequence_name']}")
+        print(f"  bids_dir: {entry['bids_dir']}")
+        print(f"  bids_name: {entry['bids_name']}")
+        print(f"  intended_for: {entry['intended_for']}\n")
 
-        selection = button_dialog(
-            title=title,
-            text=message,
-            buttons=buttons,
-            style=DEFAULT_STYLE,
-        ).run()
+        action = questionary.select(
+            "Choose an action:",
+            choices=[
+                "Edit bids_dir",
+                "Edit bids_name",
+                "Edit intended_for",
+                "Previous sequence",
+                "Next sequence",
+                "Save and exit",
+                "Quit without saving",
+            ],
+            default="Next sequence",
+        ).ask()
+        if action is None:
+            raise KeyboardInterrupt("User exited without saving.")
 
-        if selection == "edit_dir":
-            entry["bids_dir"] = _choose_bids_dir(entry["bids_dir"])
+        if action == "Edit bids_dir":
+            entry["bids_dir"] = questionary.select(
+                "Select bids_dir:",
+                choices=BIDS_DIR_OPTIONS,
+                default=entry["bids_dir"],
+            ).ask() or entry["bids_dir"]
+            if entry["bids_dir"] == "EXCLUDE_BIDS_Directory":
+                entry["bids_name"] = EXCLUDE_BIDS_NAME
+                entry["intended_for"] = UNASSIGNED
+            elif entry["bids_dir"] != "fmap":
+                entry["intended_for"] = UNASSIGNED
+            if entry["bids_name"] == EXCLUDE_BIDS_NAME:
+                entry["bids_name"] = suggest_labels(entry["sequence_name"], [e["sequence_name"] for e in entries])["bids_name"]
+
+        elif action == "Edit bids_name":
+            choices = _bids_name_options(entry)
+            entry["bids_name"] = questionary.select(
+                "Select bids_name:",
+                choices=choices,
+                default=entry["bids_name"],
+            ).ask() or entry["bids_name"]
+            if entry["bids_name"] == EXCLUDE_BIDS_NAME and entry["bids_dir"] != "EXCLUDE_BIDS_Directory":
+                entry["bids_dir"] = "EXCLUDE_BIDS_Directory"
+
+        elif action == "Edit intended_for":
+            choices = _intended_for_options(entry, entries)
+            entry["intended_for"] = questionary.select(
+                "Select intended_for:",
+                choices=choices,
+                default=entry["intended_for"],
+            ).ask() or entry["intended_for"]
             if entry["bids_dir"] != "fmap":
-                entry["intended_for"] = ""
+                entry["intended_for"] = UNASSIGNED
 
-        elif selection == "edit_name":
-            entry["bids_name"] = _prompt_text("BIDS name", entry["bids_name"])
-
-        elif selection == "edit_intended":
-            entry["intended_for"] = _prompt_text("intended_for", entry["intended_for"])
-
-        elif selection == "next":
+        elif action == "Next sequence":
             current_index = min(total - 1, current_index + 1)
 
-        elif selection == "previous":
+        elif action == "Previous sequence":
             current_index = max(0, current_index - 1)
 
-        elif selection == "save":
-            return {
-                item["sequence_name"]: [item["bids_dir"], item["bids_name"], item["intended_for"] or ""]
-                for item in entries
-            }
+        elif action == "Save and exit":
+            return {item["sequence_name"]: [item["bids_dir"], item["bids_name"], item["intended_for"]] for item in entries}
 
-        elif selection == "quit":
+        elif action == "Quit without saving":
             raise KeyboardInterrupt("User exited without saving.")
 
 
 def _run_text_ui(entries: List[Dict[str, Any]]) -> Dict[str, List[str]]:
-    print("prompt_toolkit is not installed; falling back to plain text prompts.")
+    print("questionary is not installed; falling back to plain text prompts.")
     total = len(entries)
     for index, entry in enumerate(entries, start=1):
         print(f"\nSequence {index} of {total}: {entry['sequence_name']}")
@@ -203,28 +228,44 @@ def _run_text_ui(entries: List[Dict[str, Any]]) -> Dict[str, List[str]]:
         if entry["bids_dir"] == "fmap":
             entry["intended_for"] = _prompt_text("intended_for", entry["intended_for"])
         else:
-            entry["intended_for"] = ""
+            entry["intended_for"] = UNASSIGNED
     return {
-        entry["sequence_name"]: [entry["bids_dir"], entry["bids_name"], entry["intended_for"] or ""]
+        entry["sequence_name"]: [entry["bids_dir"], entry["bids_name"], entry["intended_for"]]
         for entry in entries
     }
 
 
-def _choose_bids_dir(current_value: str) -> str:
-    values = [(option, option) for option in BIDS_DIR_OPTIONS]
-    result = radiolist_dialog(
-        title="Select BIDS directory",
-        text="Choose the most appropriate BIDS directory for this sequence:",
-        values=values,
-        style=DEFAULT_STYLE,
-    ).run()
-    return result or current_value
+def _bids_name_options(entry: Dict[str, Any]) -> List[str]:
+    if entry["bids_dir"] == "anat":
+        choices = ["T1w", "T2w", EXCLUDE_BIDS_NAME]
+    elif entry["bids_dir"] == "func":
+        base = infer_task_label(entry["sequence_name"])
+        choices = [f"task-{base}_bold", "task-rest_bold", "task-nback_bold", "task-flanker_bold", EXCLUDE_BIDS_NAME]
+    elif entry["bids_dir"] == "fmap":
+        choices = ["dir-AP_epi", "dir-PA_epi", EXCLUDE_BIDS_NAME]
+    elif entry["bids_dir"] == "dwi":
+        choices = ["dwi", EXCLUDE_BIDS_NAME]
+    else:
+        choices = [EXCLUDE_BIDS_NAME]
+    if entry["bids_name"] not in choices:
+        choices.insert(0, entry["bids_name"])
+    return choices
+
+
+def _intended_for_options(entry: Dict[str, Any], entries: List[Dict[str, Any]]) -> List[str]:
+    if entry["bids_dir"] != "fmap":
+        return [UNASSIGNED]
+
+    func_labels = sorted({item["bids_name"] for item in entries if item["bids_dir"] == "func" and item["bids_name"] != EXCLUDE_BIDS_NAME})
+    if not func_labels:
+        return [UNASSIGNED]
+    choices = func_labels + [UNASSIGNED]
+    if entry["intended_for"] not in choices:
+        choices.insert(0, entry["intended_for"])
+    return choices
 
 
 def _prompt_text(label: str, default: str) -> str:
-    if PROMPT_TOOLKIT_AVAILABLE:
-        response = input_dialog(title=f"Edit {label}", text=f"Enter value for {label}:", default=default).run()
-        return response or default
     print(f"{label} [{default}]: ", end="")
     answer = input().strip()
     return answer if answer else default
