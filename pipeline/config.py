@@ -30,7 +30,7 @@ def _apply_defaults(config):
         "tokens": {
             "anat": ["mprage", "t1", "t2", "anat", "mpr", "sag", "t1w", "t2w"],
             "func": ["bold", "fmri", "rest", "nback", "flanker", "task", "functional", "sbref"],
-            "fmap": ["fieldmap", "field_map", "fmap", "phase", "phasediff", "magnitude", "ap", "pa"],
+            "fmap": ["fieldmap", "field_map", "fmap", "phase", "phasediff", "magnitude"],
             "dwi": ["dwi", "diff", "dtifit", "dti"]
         },
         "xnat": {
