@@ -17,10 +17,22 @@ def load_config(path="pipeline_config.json"):
     return config
 
 
+def load_default_config(root_dir="."):
+    config = _apply_defaults({})
+    config_dir = Path(root_dir)
+    return _resolve_paths(config, config_dir)
+
+
 def _apply_defaults(config):
     defaults = {
         "study_root": ".",
         "log_dir": "",
+        "tokens": {
+            "anat": ["mprage", "t1", "t2", "anat", "mpr", "sag", "t1w", "t2w"],
+            "func": ["bold", "fmri", "rest", "nback", "flanker", "task", "functional", "sbref"],
+            "fmap": ["fieldmap", "field_map", "fmap", "phase", "phasediff", "magnitude", "ap", "pa"],
+            "dwi": ["dwi", "diff", "dtifit", "dti"]
+        },
         "xnat": {
             "script_path": "scripts/xnat_download.R",
             "output_dir": "sourcedata"
@@ -51,6 +63,12 @@ def _apply_defaults(config):
     for key in ["xnat", "bidskit", "mriqc", "fmriprep"]:
         merged[key] = {**defaults.get(key, {}), **config.get(key, {})}
 
+    user_tokens = config.get("tokens", {})
+    merged_tokens = {}
+    for token_type, default_list in defaults["tokens"].items():
+        extra_list = user_tokens.get(token_type, [])
+        merged_tokens[token_type] = list(dict.fromkeys(default_list + extra_list))
+    merged["tokens"] = merged_tokens
     return merged
 
 

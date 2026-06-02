@@ -1,6 +1,12 @@
 {
   "study_root": ".",
-  "log_dir": "logs",
+  "log_dir": "",
+  "tokens": {
+    "anat": ["mprage", "t1", "t2", "anat", "mpr", "sag", "t1w", "t2w"],
+    "func": ["bold", "fmri", "rest", "nback", "flanker", "task", "functional", "sbref"],
+    "fmap": ["fieldmap", "field_map", "fmap", "phase", "phasediff", "magnitude", "ap", "pa"],
+    "dwi": ["dwi", "diff", "dtifit", "dti"]
+  },
   "xnat": {
     "script_path": "scripts/xnat_download.R",
     "output_dir": "sourcedata"

@@ -1,14 +1,18 @@
+import argparse
 import json
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 try:
-    import questionary
+    import questionary  # type: ignore
     QUESTIONARY_AVAILABLE = True
 except ImportError:
     QUESTIONARY_AVAILABLE = False
+
+from .config import load_config, load_default_config
+from .logger import append_event
 
 BIDS_DIR_OPTIONS = ["EXCLUDE_BIDS_Directory", "anat", "func", "fmap", "dwi"]
 EXCLUDE_BIDS_NAME = "EXCLUDE_BIDS_Name"
@@ -32,7 +36,7 @@ def summarize_sequences(data: Dict[str, List[str]]) -> List[str]:
     return sequence_names
 
 
-def suggest_labels(sequence_name: str, all_sequence_names: List[str]) -> Dict[str, str]:
+def suggest_labels(sequence_name: str, all_sequence_names: List[str], tokens: Dict[str, List[str]]) -> Dict[str, str]:
     lower = sequence_name.lower()
     hints = {
         "bids_dir": "EXCLUDE_BIDS_Directory",
@@ -43,10 +47,10 @@ def suggest_labels(sequence_name: str, all_sequence_names: List[str]) -> Dict[st
     if "aahead" in lower or "aahead" in lower or "scout" in lower or "localizer" in lower:
         return hints
 
-    anat_tokens = ["mprage", "t1", "t2", "anat", "mpr", "sag", "t1w", "t2w"]
-    func_tokens = ["bold", "fmri", "rest", "nback", "flanker", "task", "functional"]
-    fmap_tokens = ["fieldmap", "field_map", "fmap", "phase", "phasediff", "magnitude", "ap", "pa"]
-    dwi_tokens = ["dwi", "diff", "dtifit", "dti"]
+    anat_tokens = tokens.get("anat", [])
+    func_tokens = tokens.get("func", [])
+    fmap_tokens = tokens.get("fmap", [])
+    dwi_tokens = tokens.get("dwi", [])
 
     if any(token in lower for token in anat_tokens) and not any(token in lower for token in func_tokens):
         hints["bids_dir"] = "anat"
@@ -59,65 +63,81 @@ def suggest_labels(sequence_name: str, all_sequence_names: List[str]) -> Dict[st
     elif any(token in lower for token in fmap_tokens):
         hints["bids_dir"] = "fmap"
         hints["bids_name"] = infer_fieldmap_name(lower)
-        hints["intended_for"] = suggest_intended_for(sequence_name, all_sequence_names)
+        hints["intended_for"] = suggest_intended_for(sequence_name, all_sequence_names, tokens)
 
     elif any(token in lower for token in func_tokens):
         hints["bids_dir"] = "func"
-        hints["bids_name"] = f"task-{infer_task_label(sequence_name)}_bold"
+        hints["bids_name"] = infer_func_name(sequence_name, tokens)
 
     return hints
 
 
-def infer_task_label(sequence_name: str) -> str:
+def infer_task_label(sequence_name: str, tokens: Dict[str, List[str]]) -> str:
     lower = sequence_name.lower()
-    if "rest" in lower:
-        return "rest"
-    if "nback" in lower:
-        return "nback"
-    if "flanker" in lower:
-        return "flanker"
+    func_tokens = tokens.get("func", [])
+    task_tokens = [tok for tok in func_tokens if tok not in {"bold", "fmri", "task", "sbref", "run"}]
+
+    for tok in task_tokens:
+        if tok in lower:
+            return tok
 
     parts = [part for part in lower.replace("-", " ").replace("_", " ").split() if part]
-    common = [p for p in parts if p.isalpha() and p not in {"bold", "fmri", "task", "run"}]
+    ignore = set(func_tokens) | {"bold", "fmri", "task", "run"}
+    common = [p for p in parts if p.isalpha() and p not in ignore]
     return common[0] if common else "unknown"
 
 
+def infer_func_name(sequence_name: str, tokens: Dict[str, List[str]]) -> str:
+    lower = sequence_name.lower()
+    if "sbref" in lower:
+        return f"task-{infer_task_label(sequence_name, tokens)}"
+    return f"task-{infer_task_label(sequence_name, tokens)}_bold"
+
+
 def infer_fieldmap_name(lower_sequence_name: str) -> str:
-    if "ap" in lower_sequence_name:
+    tokens = tokenize_name(lower_sequence_name)
+    if "ap" in tokens:
         return "dir-AP_epi"
-    if "pa" in lower_sequence_name:
+    if "pa" in tokens:
         return "dir-PA_epi"
     if "phasediff" in lower_sequence_name or "phase" in lower_sequence_name:
         return "dir-AP_epi"
     return "dir-PA_epi"
 
 
-def suggest_intended_for(sequence_name: str, all_sequence_names: List[str]) -> str:
-    func_candidates = [name for name in all_sequence_names if any(tok in name.lower() for tok in ["bold", "fmri", "rest", "nback", "flanker"])]
+def suggest_intended_for(sequence_name: str, all_sequence_names: List[str], tokens: Dict[str, List[str]]) -> str:
+    func_candidates = [name for name in all_sequence_names if any(tok in name.lower() for tok in tokens.get("func", []))]
     if not func_candidates:
         return UNASSIGNED
 
-    lower = sequence_name.lower()
-    if "nback" in lower:
-        return "task-nback_bold"
-    if "flanker" in lower:
-        return "task-flanker_bold"
-    if "rest" in lower:
-        return "task-rest_bold"
+    candidate_labels = []
+    for name in func_candidates:
+        func_name = infer_func_name(name, tokens)
+        if func_name not in {"task-unknown_bold", "task-unknown_sbref"}:
+            candidate_labels.append(func_name)
+
+    if not candidate_labels:
+        return UNASSIGNED
 
     source_tokens = set(tokenize_name(sequence_name))
-    candidate_labels = [f"task-{infer_task_label(name)}_bold" for name in func_candidates]
-    candidate_labels = [label for label in candidate_labels if label != "task-unknown_bold"]
-    if candidate_labels:
-        return candidate_labels[0]
-    return UNASSIGNED
+    best_label = None
+    best_score = -1
+    for label in candidate_labels:
+        label_tokens = set(tokenize_name(label.replace("task-", "")))
+        score = len(source_tokens & label_tokens)
+        if score > best_score:
+            best_score = score
+            best_label = label
+
+    selected = best_label or candidate_labels[0]
+    return f"[\"{selected}\"]"
 
 
 def tokenize_name(name: str) -> List[str]:
     return [token for token in name.lower().replace("-", " ").replace("_", " ").split() if token]
 
 
-def run_annotation_ui(protocol_data: Dict[str, List[str]]) -> Dict[str, List[str]]:
+def run_annotation_ui(protocol_data: Dict[str, List[str]], tokens: Dict[str, List[str]]) -> Dict[str, List[str]]:
     sequence_names = list(protocol_data.keys())
     entries = []
     for sequence_name, values in protocol_data.items():
@@ -136,15 +156,15 @@ def run_annotation_ui(protocol_data: Dict[str, List[str]]) -> Dict[str, List[str
             "intended_for": intended_for,
         }
         if bids_dir == "EXCLUDE_BIDS_Directory" and bids_name == EXCLUDE_BIDS_NAME and intended_for == UNASSIGNED:
-            entry.update(suggest_labels(sequence_name, sequence_names))
+            entry.update(suggest_labels(sequence_name, sequence_names, tokens))
         entries.append(entry)
 
     if QUESTIONARY_AVAILABLE:
-        return _run_questionary_ui(entries)
+        return _run_questionary_ui(entries, tokens)
     return _run_text_ui(entries)
 
 
-def _run_questionary_ui(entries: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+def _run_questionary_ui(entries: List[Dict[str, Any]], tokens: Dict[str, List[str]]) -> Dict[str, List[str]]:
     total = len(entries)
     current_index = 0
 
@@ -183,25 +203,44 @@ def _run_questionary_ui(entries: List[Dict[str, Any]]) -> Dict[str, List[str]]:
             elif entry["bids_dir"] != "fmap":
                 entry["intended_for"] = UNASSIGNED
             if entry["bids_name"] == EXCLUDE_BIDS_NAME:
-                entry["bids_name"] = suggest_labels(entry["sequence_name"], [e["sequence_name"] for e in entries])["bids_name"]
-
+                entry["bids_name"] = suggest_labels(entry["sequence_name"], [e["sequence_name"] for e in entries], tokens)["bids_name"]
         elif action == "Edit bids_name":
-            choices = _bids_name_options(entry)
-            entry["bids_name"] = questionary.select(
+            choices = _bids_name_options(entry, tokens)
+            if "Custom..." not in choices:
+                choices.append("Custom...")
+            choice = questionary.select(
                 "Select bids_name:",
                 choices=choices,
                 default=entry["bids_name"],
-            ).ask() or entry["bids_name"]
+            ).ask()
+            if choice == "Custom...":
+                custom_value = questionary.text(
+                    "Enter custom bids_name:",
+                    default=entry["bids_name"] if entry["bids_name"] not in [EXCLUDE_BIDS_NAME, UNASSIGNED] else "",
+                ).ask()
+                entry["bids_name"] = custom_value or entry["bids_name"]
+            else:
+                entry["bids_name"] = choice or entry["bids_name"]
             if entry["bids_name"] == EXCLUDE_BIDS_NAME and entry["bids_dir"] != "EXCLUDE_BIDS_Directory":
                 entry["bids_dir"] = "EXCLUDE_BIDS_Directory"
 
         elif action == "Edit intended_for":
             choices = _intended_for_options(entry, entries)
-            entry["intended_for"] = questionary.select(
+            if "Custom..." not in choices:
+                choices.append("Custom...")
+            choice = questionary.select(
                 "Select intended_for:",
                 choices=choices,
                 default=entry["intended_for"],
-            ).ask() or entry["intended_for"]
+            ).ask()
+            if choice == "Custom...":
+                custom_value = questionary.text(
+                    "Enter custom intended_for:",
+                    default=entry["intended_for"] if entry["intended_for"] != UNASSIGNED else "",
+                ).ask()
+                entry["intended_for"] = custom_value or entry["intended_for"]
+            else:
+                entry["intended_for"] = choice or entry["intended_for"]
             if entry["bids_dir"] != "fmap":
                 entry["intended_for"] = UNASSIGNED
 
@@ -235,12 +274,22 @@ def _run_text_ui(entries: List[Dict[str, Any]]) -> Dict[str, List[str]]:
     }
 
 
-def _bids_name_options(entry: Dict[str, Any]) -> List[str]:
+def _bids_name_options(entry: Dict[str, Any], tokens: Dict[str, List[str]]) -> List[str]:
     if entry["bids_dir"] == "anat":
         choices = ["T1w", "T2w", EXCLUDE_BIDS_NAME]
     elif entry["bids_dir"] == "func":
-        base = infer_task_label(entry["sequence_name"])
-        choices = [f"task-{base}_bold", "task-rest_bold", "task-nback_bold", "task-flanker_bold", EXCLUDE_BIDS_NAME]
+        base = infer_task_label(entry["sequence_name"], tokens)
+        if "sbref" in entry["sequence_name"].lower():
+            choices = [f"task-{base}_sbref", EXCLUDE_BIDS_NAME]
+        else:
+            choices = [f"task-{base}_bold", EXCLUDE_BIDS_NAME]
+        func_tokens = [tok for tok in tokens.get("func", []) if tok not in {"bold", "fmri", "task", "sbref", "run"}]
+        for tok in func_tokens:
+            if tok != base:
+                if "sbref" in entry["sequence_name"].lower():
+                    choices.insert(-1, f"task-{tok}_sbref")
+                else:
+                    choices.insert(-1, f"task-{tok}_bold")
     elif entry["bids_dir"] == "fmap":
         choices = ["dir-AP_epi", "dir-PA_epi", EXCLUDE_BIDS_NAME]
     elif entry["bids_dir"] == "dwi":
@@ -281,25 +330,37 @@ def save_protocol(data: Dict[str, List[str]], file_path: str) -> None:
     print(f"Backup of original saved to {backup_path}")
 
 
-def annotate_protocol(file_path: str) -> None:
+def annotate_protocol(file_path: str, config_path: Optional[str] = "pipeline_config.json") -> None:
+    try:
+        config = load_config(config_path)
+    except FileNotFoundError:
+        config = load_default_config(str(Path(file_path).parent))
+    append_event(f"Starting annotation for {file_path}", config, step="annotate_protocol")
     protocol_data = load_protocol(file_path)
     summarize_sequences(protocol_data)
     try:
-        updated_data = run_annotation_ui(protocol_data)
+        updated_data = run_annotation_ui(protocol_data, config.get("tokens", {}))
     except KeyboardInterrupt:
+        append_event("Annotation cancelled by user", config, step="annotate_protocol")
         print("\nAnnotation cancelled. No changes were written.")
         return
     save_protocol(updated_data, file_path)
+    append_event(f"Saved annotation to {file_path}", config, step="annotate_protocol")
 
 
 def main(argv=None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    if len(argv) != 1:
-        print("Usage: annotate_protocol /path/to/Protocol_Translator.json")
-        return 1
+    parser = argparse.ArgumentParser(description="Annotate a bidskit protocol_translator.json file.")
+    parser.add_argument("file_path", help="Path to Protocol_Translator.json")
+    parser.add_argument(
+        "--config",
+        default="pipeline_config.json",
+        help="Path to a pipeline config JSON file.",
+    )
+    args = parser.parse_args(argv)
 
-    annotate_protocol(argv[0])
+    annotate_protocol(args.file_path, args.config)
     return 0
 
 
