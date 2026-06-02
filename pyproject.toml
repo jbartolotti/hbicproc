@@ -6,4 +6,4 @@ requires-python = ">=3.8"
 
 [project.scripts]
 pipeline = "pipeline.cli:main"
-annotate_protocol = "pipeline.annotate_protocol:annotate_protocol"
+annotate_protocol = "pipeline.annotate_protocol:main"

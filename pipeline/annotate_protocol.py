@@ -251,8 +251,16 @@ def annotate_protocol(file_path: str) -> None:
     save_protocol(updated_data, file_path)
 
 
+def main(argv=None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if len(argv) != 1:
+        print("Usage: annotate_protocol /path/to/Protocol_Translator.json")
+        return 1
+
+    annotate_protocol(argv[0])
+    return 0
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python -m pipeline.annotate_protocol /path/to/Protocol_Translator.json")
-        sys.exit(1)
-    annotate_protocol(sys.argv[1])
+    raise SystemExit(main())
