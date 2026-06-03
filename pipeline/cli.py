@@ -5,6 +5,7 @@ from pathlib import Path
 from .config import load_config, save_default_config
 from .pipeline import PipelineRunner
 from .state import load_subject_state, save_subject_state
+from .status import save_pipeline_status_figure
 from .utils import list_subjects, write_json, load_json
 
 
@@ -17,9 +18,8 @@ def _print_result(result):
     if result.next_command:
         print("\nNext step:")
         print(f"  {result.next_command}")
-    if result.details:
-        if result.details.get("command"):
-            print(f"\nCommand:\n  {result.details['command']}")
+    if result.details and result.details.get("command"):
+        print(f"\nCommand:\n  {result.details['command']}")
 
 
 def _load_config(path):
@@ -36,7 +36,7 @@ def _write_default_config(path):
     print("Edit the file to adjust study paths, containers, and credentials.")
 
 
-def _run_for_all(stage_name, config, dry_run=False):
+def _run_for_all(stage_name, config, dry_run=False, rerun=False):
     subjects = list_subjects(config)
     if not subjects:
         print("No subjects found in BIDS output directory.")
@@ -45,16 +45,16 @@ def _run_for_all(stage_name, config, dry_run=False):
     exit_code = 0
     for subject in subjects:
         print(f"\n=== {stage_name} {subject} ===")
-        result = runner.run_stage(stage_name, subject, dry_run=dry_run)
+        result = runner.run_stage(stage_name, subject, dry_run=dry_run, rerun=rerun)
         _print_result(result)
         if not result.success:
             exit_code = 1
     return exit_code
 
 
-def _run_subject_stage(stage_name, subject, config, dry_run=False):
+def _run_subject_stage(stage_name, subject, config, dry_run=False, rerun=False):
     runner = PipelineRunner(config)
-    result = runner.run_stage(stage_name, subject, dry_run=dry_run)
+    result = runner.run_stage(stage_name, subject, dry_run=dry_run, rerun=rerun)
     _print_result(result)
     return 0 if result.success else 1
 
@@ -64,6 +64,20 @@ def _run_resume(subject, config, dry_run=False):
     result = runner.run_resume(subject, dry_run=dry_run)
     _print_result(result)
     return 0 if result.success else 1
+
+
+def _run_resume_all(config, dry_run=False):
+    subjects = list_subjects(config)
+    if not subjects:
+        print("No subjects found in BIDS output directory.")
+        return 1
+    exit_code = 0
+    for subject in subjects:
+        print(f"\n=== Running pipeline for {subject} ===")
+        result = _run_resume(subject, config, dry_run=dry_run)
+        if result != 0:
+            exit_code = 1
+    return exit_code
 
 
 def _subject_exclusion(subject, config, runs, clear):
@@ -122,9 +136,26 @@ def main(argv=None):
             action="store_true",
             help="Run the stage for all subjects found in the BIDS output directory.",
         )
+        stage_parser.add_argument(
+            "--rerun",
+            action="store_true",
+            help="Re-run the stage and overwrite existing outputs regardless of previous completion.",
+        )
+
+    status_parser = subparsers.add_parser("status", help="Generate a pipeline status figure across subjects and stages.")
+    status_parser.add_argument(
+        "--output",
+        default=None,
+        help="Optional path to save the status figure.",
+    )
 
     run_parser = subparsers.add_parser("run", help="Resume the pipeline from the last incomplete stage.")
-    run_parser.add_argument("subject", help="Participant label, e.g. sub-011.")
+    run_parser.add_argument("subject", nargs="?", help="Participant label, e.g. sub-011. Omit to run all subjects.")
+    run_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Run the pipeline for all subjects found in the BIDS output directory.",
+    )
 
     exclude_parser = subparsers.add_parser("exclude", help="Record MRIQC exclusions for a subject.")
     exclude_parser.add_argument("subject", help="Participant label, e.g. sub-011.")
@@ -148,17 +179,27 @@ def main(argv=None):
 
     config = _load_config(args.config)
 
+    if args.command == "status":
+        output_path = args.output
+        figure_path = save_pipeline_status_figure(config, output_path=output_path)
+        print(f"Pipeline status figure saved to: {figure_path}")
+        return 0
+
     if args.command in ["download", "bidsify", "validate", "qc", "preprocess"]:
         if args.all:
             if args.subject:
                 parser.error("Cannot specify a subject and --all together.")
-            return _run_for_all(args.command, config, dry_run=args.dry_run)
+            return _run_for_all(args.command, config, dry_run=args.dry_run, rerun=args.rerun)
         if not args.subject:
             parser.error("Subject is required unless --all is used.")
-        return _run_subject_stage(args.command, args.subject, config, dry_run=args.dry_run)
+        return _run_subject_stage(args.command, args.subject, config, dry_run=args.dry_run, rerun=args.rerun)
 
     if args.command == "run":
-        return _run_resume(args.subject, config, dry_run=args.dry_run)
+        if args.subject and args.all:
+            parser.error("Cannot specify a subject and --all together.")
+        if args.subject:
+            return _run_resume(args.subject, config, dry_run=args.dry_run)
+        return _run_resume_all(config, dry_run=args.dry_run)
 
     if args.command == "exclude":
         if not args.runs and not args.clear:

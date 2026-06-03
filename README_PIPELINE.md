@@ -15,6 +15,7 @@ hbicproc qc sub-001
 hbicproc exclude sub-001 --run task-nback_run-2
 hbicproc preprocess sub-001
 hbicproc run sub-001
+hbicproc status
 ```
 
 Batch commands:
@@ -22,7 +23,10 @@ Batch commands:
 ```bash
 hbicproc qc --all
 hbicproc preprocess --all
+hbicproc run --all
 ```
+
+Stage commands also support `--rerun` to force execution even when a stage is marked complete.
 
 ## Pipeline stages
 
@@ -37,9 +41,15 @@ hbicproc preprocess --all
 
 Edit `pipeline_config.json` to set your study root, BIDS paths, Singularity images, and exclusions file.
 
+A sample configuration is available at `pipeline_config.sample.json`.
+
 ## MRIQC
 
 The QC stage runs participant-level MRIQC and prints the exact next command for human review.
+
+## Status reporting
+
+`hbicproc status` scans all recorded subject state files and writes a stage-completion grid to an SVG file in the BIDS code directory by default.
 
 ## Exclusions
 

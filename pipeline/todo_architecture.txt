@@ -1,0 +1,27 @@
+TODO: pipeline architecture summary and next work
+
+Current capabilities:
+- Stage-based CLI with `download`, `bidsify`, `validate`, `qc`, `exclude`, `preprocess`, `run`, and `status`.
+- Per-subject JSON state file in `sub-XXX/.pipeline_state.json`.
+- `PipelineRunner` determines next stage and skips completed stages.
+- `hbicproc run sub-XXX` resumes a single subject from its next incomplete stage.
+- `hbicproc run --all` resumes all subjects found in the BIDS output directory.
+- `hbicproc status` generates an SVG completion grid for subjects/sessions vs stages.
+- `--rerun` support for stage commands to override completion state.
+
+Outstanding architecture items:
+- Add stronger stage-level verification of expected outputs and actual files on disk.
+- Implement `hbicproc status --text` or a CLI summary mode for quick inspection without SVG.
+- Add a reset/rerun command for specific stage or subject-state fields.
+- Enhance session handling for multi-session subjects and subject/session-specific state.
+- Add optional stage dependency validation so stage completion is verified against actual artifacts.
+- Add a central `hbicproc list` or `hbicproc status` summary that prints next-needed actions.
+
+Future session entry points:
+- `todo_download.txt` for XNAT download implementation
+- `todo_bidsify.txt` for bidskit conversion and output verification
+- `todo_validate.txt` for BIDS validation and light quality checks
+- `todo_qc.txt` for MRIQC execution and report verification
+- `todo_qc_review.txt` for exclusions UI and human checkpoint refinement
+- `todo_preprocess.txt` for fMRIPrep execution and exclusion integration
+- `todo_architecture.txt` for the overall runner/scheduler architecture

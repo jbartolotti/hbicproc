@@ -1,0 +1,19 @@
+TODO: bidsify stage
+
+Goal:
+- Convert sourcedata to BIDS for a subject using bidskit.
+- Keep the stage resumable and skip when BIDS outputs already exist.
+- Update state when bidsification completes.
+
+Tasks:
+- Determine the exact bidskit command-line arguments needed for our study.
+- Validate that config['bidskit']['input_dir'] and output_dir are resolved correctly.
+- Add reporting of converted directories and any missing files.
+- Verify expected BIDS files exist after conversion instead of trusting the state file alone.
+- Optionally add a lightweight BIDS directory check after conversion.
+- Ensure dry-run prints the bidskit command.
+- Add `--rerun` support to force bidsification even when state says complete.
+
+Notes:
+- The current implementation is a placeholder if `extra_args` is empty.
+- Future iterations can add subject filtering and explicit participant label handling.

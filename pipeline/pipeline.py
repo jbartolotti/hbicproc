@@ -37,13 +37,13 @@ class PipelineRunner:
             return stage_name
         return None
 
-    def run_stage(self, stage_name, subject, dry_run=False):
+    def run_stage(self, stage_name, subject, dry_run=False, rerun=False):
         if stage_name not in self.stages:
             return StageResult(success=False, message=f"Unknown stage: {stage_name}")
 
         state = self.load_state(subject)
         stage = self.stages[stage_name]
-        result = stage.execute(subject, self.config, state, dry_run=dry_run)
+        result = stage.execute(subject, self.config, state, dry_run=dry_run, rerun=rerun)
 
         if result.success and not result.skipped and stage.state_key and not stage.human_step:
             self.save_state(subject, state)

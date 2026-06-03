@@ -1,0 +1,17 @@
+TODO: qc_review stage
+
+Goal:
+- Represent the human inspection / exclusion decision point in the pipeline.
+- Keep this step explicit and not automatically completed by code.
+- Link to the exclusion record in derivatives/hbicproc/exclusions.json.
+
+Tasks:
+- Determine whether `qc_review` should be invoked automatically after `qc` or only via `hbicproc exclude`.
+- Add structured validation for exclusions input and ensure the exclusions file is written correctly.
+- Make the stage clearly indicate that manual review is required.
+- Keep `qc_review` state false until the user records exclusions.
+- Add `--rerun` support at the CLI level so a reviewer can redo exclusion decisions if needed.
+
+Notes:
+- The current `qc_review` stage returns success=False to force human action.
+- The `exclude` command currently marks `qc_reviewed` true and writes exclusions.

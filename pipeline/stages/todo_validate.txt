@@ -1,0 +1,19 @@
+TODO: validate stage
+
+Goal:
+- Perform lightweight dataset validation after BIDS conversion.
+- Provide a summary of BIDS structure and next-step guidance.
+- Mark the validate stage complete in state.
+
+Tasks:
+- Add checks for expected BIDS files and directory layout.
+- Optionally integrate the BIDS Validator or call it as an external process.
+- Report missing sessions, intended subjects, and any anomalous files.
+- Verify dataset expectations against real BIDS outputs instead of trusting state alone.
+- Return a clear next command: `hbicproc qc <subject>`.
+- Keep the stage idempotent and skip if state already marks validated.
+- Add `--rerun` support to refresh validation information.
+
+Notes:
+- The current summary helper is minimal; expand it to include key BIDS metadata.
+- This stage should not require manual input, but should clearly tell the user what to inspect.

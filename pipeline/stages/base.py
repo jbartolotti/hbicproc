@@ -20,8 +20,8 @@ class BaseStage:
     def run(self, subject, config, state, dry_run=False):
         raise NotImplementedError("Stage implementations must override run().")
 
-    def execute(self, subject, config, state, dry_run=False):
-        if self.state_key and state.get(self.state_key):
+    def execute(self, subject, config, state, dry_run=False, rerun=False):
+        if self.state_key and state.get(self.state_key) and not rerun:
             return StageResult(
                 success=True,
                 skipped=True,

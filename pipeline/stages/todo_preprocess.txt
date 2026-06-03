@@ -1,0 +1,19 @@
+TODO: preprocess stage
+
+Goal:
+- Run fMRIPrep for a subject using Singularity.
+- Respect exclusions from derivatives/hbicproc/exclusions.json.
+- Mark preprocessed state on success.
+
+Tasks:
+- Validate that the FreeSurfer license file exists before launching fMRIPrep.
+- Ensure the extra_args string includes `--fs-license-file` and `--participant_label {subject}`.
+- Add logic to pass excluded runs into fMRIPrep if supported by the command line.
+- Make the stage fail with a clear message when prerequisites are missing.
+- Verify the expected fMRIPrep output directories and log files after processing.
+- Confirm that the output directory and work directory are created under the study root.
+- Add `--rerun` support to force preprocessing again and overwrite prior outputs.
+
+Notes:
+- Current implementation reads the exclusions file, but does not yet translate exclusions into fMRIPrep flags.
+- For HPC, consider adding resource parameters like `--nthreads` or `--mem_mb` later.

@@ -1,0 +1,19 @@
+TODO: qc stage
+
+Goal:
+- Run MRIQC participant-level for a subject and produce HTML reports.
+- Respect HPC-friendly Singularity execution.
+- Mark qc_complete in state after success.
+
+Tasks:
+- Confirm container binding behavior and input/output mount points.
+- Ensure MRIQC receives the correct BIDS input directory and participant label.
+- Capture MRIQC logs and surface them in the stage result details.
+- Verify the expected MRIQC report files exist after execution.
+- Print user-facing instructions for reviewing HTML reports.
+- Add support for `hbicproc qc --all` via the new CLI behavior.
+- Add `--rerun` support to rerun MRIQC and replace prior results.
+
+Notes:
+- The current implementation uses SingularityRunner and writes next_command for exclusions.
+- The stage should fail cleanly if the Singularity image or BIDS directory is missing.
