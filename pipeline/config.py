@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 
 
@@ -15,6 +14,15 @@ def load_config(path="pipeline_config.json"):
     config = _apply_defaults(config)
     config = _resolve_paths(config, config_dir)
     return config
+
+
+def save_default_config(path="pipeline_config.json"):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    config = _apply_defaults({})
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(config, handle, indent=2)
+        handle.write("\n")
 
 
 def load_default_config(root_dir="."):
@@ -54,13 +62,16 @@ def _apply_defaults(config):
             "work_dir": "work/fmriprep",
             "fs_license_file": "/path/to/license.txt",
             "extra_args": "participant --participant_label {subject}"
+        },
+        "hbicproc": {
+            "exclusions_file": "derivatives/hbicproc/exclusions.json"
         }
     }
 
     merged = defaults.copy()
     merged.update(config)
 
-    for key in ["xnat", "bidskit", "mriqc", "fmriprep"]:
+    for key in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc"]:
         merged[key] = {**defaults.get(key, {}), **config.get(key, {})}
 
     user_tokens = config.get("tokens", {})
@@ -82,7 +93,7 @@ def _resolve_paths(config, root_dir):
         config["log_dir"] = str(Path(study_root) / "logs")
     config["log_dir"] = str(_resolve_path(config["log_dir"], root_dir, study_root))
 
-    for section in ["xnat", "bidskit", "mriqc", "fmriprep"]:
+    for section in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc"]:
         section_data = config.get(section, {})
         for key, value in section_data.items():
             if key.endswith("_dir") or key.endswith("_path") or key.endswith("_file"):

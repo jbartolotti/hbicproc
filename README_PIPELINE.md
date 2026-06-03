@@ -1,47 +1,49 @@
 # HBICProc Pipeline
 
-Minimal Python package for orchestrating an fMRI preprocessing workflow.
+A stage-based pipeline orchestrator for neuroimaging workflows with human checkpoints and resumable state.
 
 ## Commands
 
-Run one step for a subject:
+Stage-based CLI usage:
 
 ```bash
-python -m pipeline.cli run --subject sub-001 --step bids
-python -m pipeline.cli run --subject sub-001 --step mriqc
-python -m pipeline.cli run --subject sub-001 --step fmriprep
+hbicproc init pipeline_config.json
+hbicproc download sub-001
+hbicproc bidsify sub-001
+hbicproc validate sub-001
+hbicproc qc sub-001
+hbicproc exclude sub-001 --run task-nback_run-2
+hbicproc preprocess sub-001
+hbicproc run sub-001
 ```
+
+Batch commands:
+
+```bash
+hbicproc qc --all
+hbicproc preprocess --all
+```
+
+## Pipeline stages
+
+1. `download`
+2. `bidsify`
+3. `validate`
+4. `qc`
+5. `qc_review` (human step via `exclude`)
+6. `preprocess`
 
 ## Configuration
 
-Edit `pipeline_config.json` to set study-specific paths and container images.
+Edit `pipeline_config.json` to set your study root, BIDS paths, Singularity images, and exclusions file.
 
-## Example placeholder tool commands
+## MRIQC
 
-- `bidskit`
+The QC stage runs participant-level MRIQC and prints the exact next command for human review.
 
-```bash
-bidskit --input-dir sourcedata --output-dir work/bidskit --subject sub-001
-```
+## Exclusions
 
-- `MRIQC` via Singularity/Docker
-
-```bash
-singularity run docker://poldracklab/mriqc:latest work/bidskit derivatives/mriqc participant --participant_label sub-001
-```
-
-- `fMRIPrep` via Singularity/Docker
-
-```bash
-singularity run docker://poldracklab/fmriprep:latest work/bidskit derivatives/fmriprep --fs-license-file /path/to/license.txt participant --participant_label sub-001
-```
-
-## Design
-
-- Each step is implemented in its own module under `pipeline/steps/`.
-- Steps check whether expected outputs already exist and skip execution if present.
-- Execution results are appended to a JSON log file in `logs/`.
-- The package is intentionally lightweight and relies on subprocess calls instead of workflow frameworks.
+User decisions are stored in `derivatives/hbicproc/exclusions.json` and the `preprocess` stage reads them before execution.
 
 ## Protocol annotation tool
 

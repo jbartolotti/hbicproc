@@ -6,5 +6,6 @@ requires-python = ">=3.8"
 dependencies = ["questionary>=1.0"]
 
 [project.scripts]
+hbicproc = "pipeline.cli:main"
 pipeline = "pipeline.cli:main"
 annotate_protocol = "pipeline.annotate_protocol:main"

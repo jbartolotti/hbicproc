@@ -28,5 +28,8 @@
     "work_dir": "work/fmriprep",
     "fs_license_file": "/path/to/license.txt",
     "extra_args": "participant --participant_label {subject}"
+  },
+  "hbicproc": {
+    "exclusions_file": "derivatives/hbicproc/exclusions.json"
   }
 }
