@@ -79,7 +79,7 @@ def _resolve_paths(config, root_dir):
 
     config["study_root"] = str(study_root)
     if not config.get("log_dir"):
-        config["log_dir"] = str(Path(config["bidskit"]["output_dir"]) / "logs")
+        config["log_dir"] = str(Path(study_root) / "logs")
     config["log_dir"] = str(_resolve_path(config["log_dir"], root_dir, study_root))
 
     for section in ["xnat", "bidskit", "mriqc", "fmriprep"]:

@@ -119,6 +119,14 @@ def suggest_intended_for(sequence_name: str, all_sequence_names: List[str], toke
     if not candidate_labels:
         return UNASSIGNED
 
+    task_tokens = [tok for tok in tokens.get("func", []) if tok not in {"bold", "fmri", "task", "sbref", "run"}]
+    lower = sequence_name.lower()
+    for tok in task_tokens:
+        if tok in lower:
+            candidate = f"task-{tok}_sbref" if "sbref" in lower else f"task-{tok}_bold"
+            if candidate in candidate_labels:
+                return candidate
+
     source_tokens = set(tokenize_name(sequence_name))
     best_label = None
     best_score = -1
@@ -129,8 +137,7 @@ def suggest_intended_for(sequence_name: str, all_sequence_names: List[str], toke
             best_score = score
             best_label = label
 
-    selected = best_label or candidate_labels[0]
-    return f"[\"{selected}\"]"
+    return best_label or candidate_labels[0]
 
 
 def tokenize_name(name: str) -> List[str]:
@@ -142,6 +149,8 @@ def run_annotation_ui(protocol_data: Dict[str, List[str]], tokens: Dict[str, Lis
     entries = []
     for sequence_name, values in protocol_data.items():
         bids_dir, bids_name, intended_for = (values + [EXCLUDE_BIDS_NAME, UNASSIGNED])[:3]
+        if isinstance(intended_for, list):
+            intended_for = intended_for[0] if intended_for else UNASSIGNED
         if bids_dir not in BIDS_DIR_OPTIONS:
             bids_dir = "EXCLUDE_BIDS_Directory"
         if bids_name == "" or bids_name == "UNASSIGNED":
@@ -324,8 +333,14 @@ def save_protocol(data: Dict[str, List[str]], file_path: str) -> None:
     path = Path(file_path)
     backup_path = path.with_suffix(path.suffix + ".bak")
     shutil.copy2(path, backup_path)
+    normalized = {}
+    for sequence_name, values in data.items():
+        bids_dir, bids_name, intended_for = (values + [EXCLUDE_BIDS_NAME, UNASSIGNED])[:3]
+        if intended_for != UNASSIGNED and not isinstance(intended_for, list):
+            intended_for = [intended_for]
+        normalized[sequence_name] = [bids_dir, bids_name, intended_for]
     with path.open("w", encoding="utf-8") as handle:
-        json.dump(data, handle, indent=4)
+        json.dump(normalized, handle, indent=4)
     print(f"Saved updated protocol to {path}")
     print(f"Backup of original saved to {backup_path}")
 
