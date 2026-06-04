@@ -2,10 +2,11 @@ from pathlib import Path
 
 from .pipeline import PipelineRunner
 from .state import load_subject_state
+from .utils import get_bids_root
 
 
 def _find_subject_rows(config):
-    bids_root = Path(config["bidskit"]["output_dir"])
+    bids_root = get_bids_root(config)
     if not bids_root.exists():
         return []
 
@@ -101,6 +102,6 @@ def save_pipeline_status_figure(config, output_path=None):
     if output_path:
         output_file = Path(output_path)
     else:
-        output_file = Path(config["bidskit"]["output_dir"]) / "code" / "pipeline_status.svg"
+        output_file = Path(config["study_root"]) / "code" / "pipeline_status.svg"
 
     return _make_svg(rows, stage_names, matrix, output_file)

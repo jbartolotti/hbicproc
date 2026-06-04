@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from .base import BaseStage, StageResult
+from ..utils import get_bids_root
 
 
 class ValidateStage(BaseStage):
@@ -22,7 +23,7 @@ class ValidateStage(BaseStage):
         return "\n".join(summary)
 
     def run(self, subject, config, state, dry_run=False, rerun=False):
-        bids_dir = Path(config["bidskit"]["output_dir"]) / subject
+        bids_dir = get_bids_root(config) / subject
         if not bids_dir.exists():
             return StageResult(success=False, message=f"BIDS folder not found at {bids_dir}.")
 

@@ -93,6 +93,9 @@ def _resolve_paths(config, root_dir):
         config["log_dir"] = str(Path(study_root) / "logs")
     config["log_dir"] = str(_resolve_path(config["log_dir"], root_dir, study_root))
 
+    if config.get("bids_root"):
+        config["bids_root"] = str(_resolve_path(config["bids_root"], root_dir, study_root))
+
     for section in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc"]:
         section_data = config.get(section, {})
         for key, value in section_data.items():

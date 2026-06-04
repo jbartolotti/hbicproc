@@ -2,7 +2,7 @@ from pathlib import Path
 
 from .base import BaseStage, StageResult
 from ..container import SingularityRunner
-from ..utils import ensure_dir, load_json
+from ..utils import ensure_dir, load_json, get_bids_root
 
 
 class PreprocessStage(BaseStage):
@@ -10,7 +10,7 @@ class PreprocessStage(BaseStage):
     state_key = "preprocessed"
 
     def run(self, subject, config, state, dry_run=False, rerun=False):
-        bids_dir = Path(config["bidskit"]["output_dir"])
+        bids_dir = get_bids_root(config)
         if not bids_dir.exists():
             return StageResult(success=False, message=f"BIDS directory not found: {bids_dir}")
 

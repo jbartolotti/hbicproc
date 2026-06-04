@@ -63,11 +63,23 @@ def run_command(command, dry_run=False):
     }
 
 
+def get_bids_root(config):
+    if config.get("bids_root"):
+        return Path(config["bids_root"])
+
+    study_root = Path(config["study_root"])
+    if study_root.exists():
+        if any(p.is_dir() and p.name.startswith("sub-") for p in study_root.iterdir()):
+            return study_root
+
+    return Path(config["bidskit"]["output_dir"])
+
+
 def list_subjects(config):
-    bids_root = Path(config["bidskit"]["output_dir"])
-    if not bids_root.exists():
+    bids_root_dir = get_bids_root(config)
+    if not bids_root_dir.exists():
         return []
-    subjects = [p.name for p in sorted(bids_root.iterdir()) if p.is_dir() and p.name.startswith("sub-")]
+    subjects = [p.name for p in sorted(bids_root_dir.iterdir()) if p.is_dir() and p.name.startswith("sub-")]
     return subjects
 
 

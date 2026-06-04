@@ -3,7 +3,7 @@ import shutil
 
 from .base import BaseStage, StageResult
 from ..container import SingularityRunner
-from ..utils import ensure_dir
+from ..utils import ensure_dir, get_bids_root
 
 
 class QcStage(BaseStage):
@@ -11,7 +11,7 @@ class QcStage(BaseStage):
     state_key = "qc_complete"
 
     def run(self, subject, config, state, dry_run=False, rerun=False):
-        bids_dir = Path(config["bidskit"]["output_dir"])
+        bids_dir = get_bids_root(config) / subject
         if not bids_dir.exists():
             return StageResult(success=False, message=f"BIDS source directory not found: {bids_dir}")
 
