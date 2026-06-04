@@ -5,7 +5,11 @@ from pathlib import Path
 def load_config(path="pipeline_config.json"):
     config_path = Path(path)
     if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
+        candidate = Path.cwd() / "code" / config_path.name
+        if candidate.exists():
+            config_path = candidate
+        else:
+            raise FileNotFoundError(f"Config file not found: {path}")
 
     with config_path.open("r", encoding="utf-8") as handle:
         config = json.load(handle)
