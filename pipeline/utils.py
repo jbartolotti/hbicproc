@@ -27,13 +27,16 @@ def write_json(path, data):
 
 
 def run_command(command, dry_run=False):
+    command_str = " ".join(str(part) for part in command)
     if dry_run:
+        print(f"Dry run command: {command_str}")
         return {
             "success": True,
             "message": "Dry run: command not executed.",
-            "command": " ".join(str(part) for part in command),
+            "command": command_str,
         }
 
+    print(f"Executing command: {command_str}")
     try:
         result = subprocess.run(
             command,
@@ -43,7 +46,13 @@ def run_command(command, dry_run=False):
             check=False,
         )
     except FileNotFoundError as exc:
-        return {"success": False, "message": f"Command not found: {exc}", "stderr": ""}
+        print(f"Command failed: {exc}", file=sys.stderr)
+        return {"success": False, "message": f"Command not found: {exc}", "stderr": "", "command": command_str}
+
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
 
     if result.returncode != 0:
         return {
@@ -51,7 +60,7 @@ def run_command(command, dry_run=False):
             "message": f"Command failed with exit code {result.returncode}",
             "stdout": result.stdout,
             "stderr": result.stderr,
-            "command": " ".join(str(part) for part in command),
+            "command": command_str,
         }
 
     return {
@@ -59,7 +68,7 @@ def run_command(command, dry_run=False):
         "message": "Command completed successfully.",
         "stdout": result.stdout,
         "stderr": result.stderr,
-        "command": " ".join(str(part) for part in command),
+        "command": command_str,
     }
 
 
