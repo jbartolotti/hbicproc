@@ -23,7 +23,7 @@ class SingularityRunner:
         if clean_env is None:
             clean_env = self.clean_env
         if clean_env:
-            command.append("--clean-env")
+            command.append("--cleanenv")
 
         bind_list = list(self.binds)
         if binds:
