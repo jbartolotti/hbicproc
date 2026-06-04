@@ -9,7 +9,7 @@ class PreprocessStage(BaseStage):
     name = "preprocess"
     state_key = "preprocessed"
 
-    def run(self, subject, config, state, dry_run=False):
+    def run(self, subject, config, state, dry_run=False, rerun=False):
         bids_dir = Path(config["bidskit"]["output_dir"])
         if not bids_dir.exists():
             return StageResult(success=False, message=f"BIDS directory not found: {bids_dir}")

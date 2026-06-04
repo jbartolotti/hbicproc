@@ -66,5 +66,32 @@ class PipelineRunner:
 
         return StageResult(success=True, message=f"Pipeline complete for {subject}.")
 
+    def get_subject_for_stage(self, stage_name, rerun=False):
+        if stage_name not in self.stages:
+            return None
+
+        subjects = self.all_subjects()
+        if not subjects:
+            return None
+
+        stage_index = self.stage_order.index(stage_name)
+        previous_stages = self.stage_order[:stage_index]
+        for subject in subjects:
+            state = self.load_state(subject)
+            stage = self.stages[stage_name]
+            if stage.state_key and state.get(stage.state_key) and not rerun:
+                continue
+
+            ready = True
+            for prev_stage_name in previous_stages:
+                prev_stage = self.stages[prev_stage_name]
+                if prev_stage.state_key and not state.get(prev_stage.state_key):
+                    ready = False
+                    break
+            if ready:
+                return subject
+
+        return None
+
     def all_subjects(self):
         return list_subjects(self.config)

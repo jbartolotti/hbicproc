@@ -8,7 +8,7 @@ class DownloadStage(BaseStage):
     name = "download"
     state_key = "downloaded"
 
-    def run(self, subject, config, state, dry_run=False):
+    def run(self, subject, config, state, dry_run=False, rerun=False):
         xnat_script = Path(config["xnat"]["script_path"])
         output_dir = Path(config["xnat"]["output_dir"]) / subject
         ensure_dir(output_dir)

@@ -21,7 +21,7 @@ class ValidateStage(BaseStage):
         ]
         return "\n".join(summary)
 
-    def run(self, subject, config, state, dry_run=False):
+    def run(self, subject, config, state, dry_run=False, rerun=False):
         bids_dir = Path(config["bidskit"]["output_dir"]) / subject
         if not bids_dir.exists():
             return StageResult(success=False, message=f"BIDS folder not found at {bids_dir}.")

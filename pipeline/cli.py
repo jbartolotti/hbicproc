@@ -190,9 +190,17 @@ def main(argv=None):
             if args.subject:
                 parser.error("Cannot specify a subject and --all together.")
             return _run_for_all(args.command, config, dry_run=args.dry_run, rerun=args.rerun)
-        if not args.subject:
-            parser.error("Subject is required unless --all is used.")
-        return _run_subject_stage(args.command, args.subject, config, dry_run=args.dry_run, rerun=args.rerun)
+
+        subject = args.subject
+        if not subject:
+            runner = PipelineRunner(config)
+            subject = runner.get_subject_for_stage(args.command, rerun=args.rerun)
+            if not subject:
+                print(f"No eligible subject found for stage '{args.command}'.")
+                return 1
+            print(f"No subject specified. Running {args.command} for next eligible subject: {subject}")
+
+        return _run_subject_stage(args.command, subject, config, dry_run=args.dry_run, rerun=args.rerun)
 
     if args.command == "run":
         if args.subject and args.all:

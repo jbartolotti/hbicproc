@@ -8,7 +8,7 @@ class BidsifyStage(BaseStage):
     name = "bidsify"
     state_key = "bidsified"
 
-    def run(self, subject, config, state, dry_run=False):
+    def run(self, subject, config, state, dry_run=False, rerun=False):
         input_dir = Path(config["bidskit"]["input_dir"]) / subject
         output_dir = Path(config["bidskit"]["output_dir"]) / subject
         ensure_dir(output_dir)
