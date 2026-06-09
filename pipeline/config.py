@@ -46,8 +46,13 @@ def _apply_defaults(config):
             "dwi": ["dwi", "diff", "dtifit", "dti"]
         },
         "xnat": {
-            "script_path": "scripts/xnat_download.R",
-            "output_dir": "sourcedata"
+            "server": "https://xnat.example.org",
+            "project_id": "MY_PROJECT",
+            "credentials_file": "pipeline/xnat_credentials.example.json",
+            "session_names_file": "",
+            "session_names_delimiter": "_",
+            "output_dir": "sourcedata",
+            "verify_ssl": True
         },
         "bidskit": {
             "input_dir": "sourcedata",

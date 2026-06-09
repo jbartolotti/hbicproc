@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from .base import BaseStage, StageResult
-from ..utils import ensure_dir, run_command
+from ..steps.download import run as download_run
 
 
 class DownloadStage(BaseStage):
@@ -9,30 +9,15 @@ class DownloadStage(BaseStage):
     state_key = "downloaded"
 
     def run(self, subject, config, state, dry_run=False, rerun=False):
-        xnat_script = Path(config["xnat"]["script_path"])
-        output_dir = Path(config["xnat"]["output_dir"]) / subject
-        ensure_dir(output_dir)
-
-        if not xnat_script.exists():
-            return StageResult(
-                success=True,
-                message=(
-                    f"Download stub created at {output_dir}."
-                    " Add XNAT logic in config['xnat']['script_path'] to perform real download."
-                ),
-                details={"subject_dir": str(output_dir)},
-            )
-
-        command = ["Rscript", str(xnat_script), subject, str(output_dir)]
-        result = run_command(command, dry_run=dry_run)
+        output_dir = Path(config["xnat"]["output_dir"])
+        result = download_run(subject, config, dry_run=dry_run, rerun=rerun)
 
         return StageResult(
             success=result["success"],
+            skipped=result.get("skipped", False),
             message=result.get("message", "Download completed."),
             details={
-                "command": result.get("command"),
-                "stdout": result.get("stdout"),
-                "stderr": result.get("stderr"),
-                "output_dir": str(output_dir),
+                "output_dir": str(output_dir / subject),
+                "command": result.get("command", ""),
             },
         )

@@ -43,6 +43,51 @@ Edit `pipeline_config.json` to set your study root, BIDS paths, Singularity imag
 
 A sample configuration is available at `pipeline_config.sample.json`.
 
+### XNAT download configuration
+
+The download stage now uses `pyxnat` and downloads data directly from XNAT.
+Set XNAT details in the `xnat` section of `pipeline_config.json`:
+
+- `xnat.server`: XNAT server URL.
+- `xnat.project_id`: XNAT project identifier.
+- `xnat.credentials_file`: path to a file containing XNAT credentials.
+- `xnat.session_names_file`: optional TSV mapping XNAT scan labels to BIDS session labels.
+- `xnat.session_names_delimiter`: optional delimiter used when a session label contains both subject and session identifiers.
+- `xnat.output_dir`: local sourcedata directory.
+- `xnat.verify_ssl`: whether to verify TLS certificates.
+
+The credentials file may be JSON or simple key/value text. For example:
+
+```json
+{"username": "MY_USER", "password": "MY_PASSWORD"}
+```
+
+or:
+
+```
+username=MY_USER
+password=MY_PASSWORD
+```
+
+The session mapping file should include a header row. Prefer using separate `subject` and `session` columns whenever possible:
+
+```
+session_sic	subject	session
+150975_011_BL	011	BL
+```
+
+If you instead have a combined session label such as `011_BL`, set `xnat.session_names_delimiter` to `_` in `pipeline_config.json`.
+
+An example TSV file is included at `pipeline/session_names.example.tsv`.
+
+If `xnat.session_names_file` is provided, `hbicproc` uses it to map XNAT experiments to BIDS session IDs. If it is omitted, the pipeline will attempt to derive `ses-...` labels automatically from the XNAT experiment labels.
+
+Run `hbicproc download sub-011` to download all sessions for `sub-011` into:
+
+```
+sourcedata/sub-011/ses-011-BL
+```
+
 ## MRIQC
 
 The QC stage runs participant-level MRIQC and prints the exact next command for human review.
