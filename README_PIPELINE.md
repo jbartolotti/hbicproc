@@ -53,6 +53,7 @@ Set XNAT details in the `xnat` section of `pipeline_config.json`:
 - `xnat.credentials_file`: path to a file containing XNAT credentials.
 - `xnat.session_names_file`: optional TSV mapping XNAT scan labels to BIDS session labels.
 - `xnat.session_names_delimiter`: optional delimiter used when a session label contains both subject and session identifiers.
+- `xnat.verbose`: optional boolean to enable detailed XNAT download debug logging to the console.
 - `xnat.output_dir`: local sourcedata directory.
 - `xnat.verify_ssl`: whether to verify TLS certificates.
 

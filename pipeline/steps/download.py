@@ -94,23 +94,49 @@ def download_subject_from_xnat(subject: str, config: dict, output_root: Path):
     session_map = {}
     session_names_file = xnat_config.get("session_names_file")
     delimiter = xnat_config.get("session_names_delimiter")
+    verbose = bool(xnat_config.get("verbose", False))
+
     if session_names_file:
         session_map = load_session_map(session_names_file, delimiter=delimiter)
 
     subject_id = normalize_subject_label(subject)
     mapped_xnat_subjects = find_xnat_subjects_for_requested_subject(subject_id, session_map)
 
+    _debug_log(verbose, "Requested subject: %s", subject)
+    _debug_log(verbose, "Normalized subject for XNAT lookup: %s", subject_id)
+    _debug_log(verbose, "XNAT server=%s project=%s verify_ssl=%s", server, project_id, verify_ssl)
+    if session_names_file:
+        _debug_log(verbose, "Loaded session names file: %s", session_names_file)
+        _debug_log(verbose, "Session map entries: %d", len(session_map))
+        matching_entries = {
+            xnat_label: entry
+            for xnat_label, entry in session_map.items()
+            if entry.get("subject") and normalize_subject_label(entry.get("subject")) == subject_id
+        }
+        _debug_log(verbose, "Session map matches for requested subject %s: %r", subject_id, matching_entries)
+    else:
+        _debug_log(verbose, "No session_names_file configured; falling back to direct XNAT subject lookup for %s", subject_id)
+
+    _debug_log(verbose, "Mapped XNAT subject IDs for requested subject: %r", list(mapped_xnat_subjects.keys()))
+
     temp_root = Path(tempfile.mkdtemp(prefix=f"hbicproc_xnat_{subject_id}_"))
     try:
         interface = Interface(server=server, user=username, password=password, verify=verify_ssl)
         try:
             if mapped_xnat_subjects:
-                download_plan = build_download_plan_for_mapped_subjects(subject_id, mapped_xnat_subjects, interface, project_id)
+                download_plan = build_download_plan_for_mapped_subjects(
+                    subject_id,
+                    mapped_xnat_subjects,
+                    interface,
+                    project_id,
+                    verbose=verbose,
+                )
             else:
-                experiments = list_subject_experiments(interface, project_id, subject_id)
+                _debug_log(verbose, "Using direct XNAT lookup for subject: %s", subject_id)
+                experiments = list_subject_experiments(interface, project_id, subject_id, verbose=verbose)
                 if not experiments:
                     raise ValueError(f"No XNAT sessions found for subject '{subject}'.")
-                download_plan = build_download_plan(subject_id, experiments, session_map)
+                download_plan = build_download_plan(subject_id, experiments, session_map, verbose=verbose)
 
             if not download_plan:
                 raise ValueError(
@@ -178,6 +204,11 @@ def normalize_session_label(session_value: str, subject_id: str) -> str:
         raise ValueError(f"Cannot normalize session label from '{session_value}'.")
 
     return f"ses-{session_token}"
+
+
+def _debug_log(verbose: bool, message: str, *args):
+    if verbose:
+        print("XNAT DEBUG:", message % args if args else message)
 
 
 def load_xnat_credentials(credentials_file: str) -> Dict[str, str]:
@@ -294,20 +325,25 @@ def build_download_plan_for_mapped_subjects(
     mapped_xnat_subjects: Dict[str, Dict[str, str]],
     interface: Interface,
     project_id: str,
+    verbose: bool = False,
 ) -> Dict[Tuple[str, str], str]:
     plan: Dict[Tuple[str, str], str] = {}
     session_labels: Dict[str, str] = {}
 
     for xnat_subject_id, entry in sorted(mapped_xnat_subjects.items()):
-        experiments = list_subject_experiments(interface, project_id, xnat_subject_id)
+        _debug_log(verbose, "Checking mapped XNAT subject '%s' for requested subject '%s'", xnat_subject_id, subject_id)
+        _debug_log(verbose, "Mapped entry values: %r", entry)
+        experiments = list_subject_experiments(interface, project_id, xnat_subject_id, verbose=verbose)
         if not experiments:
             raise ValueError(
                 f"No XNAT sessions found for mapped subject '{xnat_subject_id}' "
                 f"for requested subject '{subject_id}'."
             )
 
+        _debug_log(verbose, "Experiments found for mapped subject '%s': %r", xnat_subject_id, experiments)
         session_value = entry.get("session_value") or xnat_subject_id
         session_label = normalize_session_label(session_value, subject_id)
+        _debug_log(verbose, "Derived BIDS session label '%s' from session_value '%s'", session_label, session_value)
 
         if session_label in session_labels and session_labels[session_label] != xnat_subject_id:
             raise ValueError(
@@ -319,35 +355,61 @@ def build_download_plan_for_mapped_subjects(
         for exp_label in sorted(experiments):
             plan[(xnat_subject_id, exp_label)] = session_label
 
+    _debug_log(verbose, "Final download plan for mapped subjects: %r", plan)
     return plan
 
 
-def list_subject_experiments(interface: Interface, project_id: str, subject_id: str) -> List[str]:
+def list_subject_experiments(interface: Interface, project_id: str, subject_id: str, verbose: bool = False) -> List[str]:
+    _debug_log(verbose, "Querying XNAT for project '%s' subject '%s'", project_id, subject_id)
     subject_obj = interface.select.project(project_id).subject(subject_id)
-    if not subject_obj.exists():
+    exists = subject_obj.exists()
+    _debug_log(verbose, "XNAT subject exists check returned: %s", exists)
+    if not exists:
         raise ValueError(f"XNAT subject '{subject_id}' not found in project '{project_id}'.")
 
-    experiments = subject_obj.experiments()
+    experiments = None
+    try:
+        experiments = subject_obj.experiments()
+    except Exception as exc:
+        _debug_log(verbose, "pyxnat subject.experiments() raised: %s", exc)
+        raise
+
+    _debug_log(verbose, "pyxnat subject.experiments() raw result: %r", experiments)
     labels = _selection_get(experiments)
+    _debug_log(verbose, "Parsed experiment labels from subject.experiments(): %r", labels)
     if labels:
         return labels
 
     fallback = interface.select(f"/projects/{project_id}/subjects/{subject_id}/experiments/*")
-    return _selection_get(fallback)
+    _debug_log(verbose, "Using fallback selection path: /projects/%s/subjects/%s/experiments/*", project_id, subject_id)
+    _debug_log(verbose, "pyxnat fallback raw result: %r", fallback)
+    labels = _selection_get(fallback)
+    _debug_log(verbose, "Parsed experiment labels from fallback selection: %r", labels)
+    return labels
 
 
-def build_download_plan(subject_id: str, experiment_labels: List[str], session_map: Dict[str, Dict[str, str]]) -> Dict[Tuple[str, str], str]:
+def build_download_plan(
+    subject_id: str,
+    experiment_labels: List[str],
+    session_map: Dict[str, Dict[str, str]],
+    verbose: bool = False,
+) -> Dict[Tuple[str, str], str]:
+    _debug_log(verbose, "Building download plan for direct subject '%s' with experiments: %r", subject_id, experiment_labels)
     plan: Dict[Tuple[str, str], str] = {}
     sessions_seen = set()
     for exp_label in sorted(experiment_labels):
         if exp_label in session_map:
             entry = session_map[exp_label]
+            _debug_log(verbose, "Experiment '%s' found in session map entry: %r", exp_label, entry)
             if entry["subject"] and entry["subject"] != subject_id:
+                _debug_log(verbose, "Skipping experiment '%s' because session map subject '%s' does not match requested subject '%s'", exp_label, entry["subject"], subject_id)
                 continue
             session_label = normalize_session_label(entry["session_value"], subject_id)
         else:
+            _debug_log(verbose, "Experiment '%s' not in session map; normalizing from XNAT label", exp_label)
             session_label = normalize_session_label(exp_label, subject_id)
 
+        _debug_log(verbose, "Derived BIDS session label '%s' for XNAT experiment '%s'", session_label, exp_label)
         if session_label in sessions_seen:
             raise ValueError(
                 f"Duplicate BIDS session label '{session_label}' derived from XNAT labels: {exp_label}."
@@ -355,6 +417,7 @@ def build_download_plan(subject_id: str, experiment_labels: List[str], session_m
         sessions_seen.add(session_label)
         plan[(subject_id, exp_label)] = session_label
 
+    _debug_log(verbose, "Final download plan for direct subject: %r", plan)
     return plan
 
 

@@ -13,6 +13,7 @@
     "credentials_file": "code/xnat_credentials.example.json",
     "session_names_file": "code/session_names.example.tsv",
     "session_names_delimiter": "_",
+    "verbose": false,
     "output_dir": "sourcedata",
     "verify_ssl": true
   },
