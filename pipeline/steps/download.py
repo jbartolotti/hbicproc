@@ -2,10 +2,12 @@ from pathlib import Path
 import csv
 import configparser
 import json
+import netrc
 import re
 import shutil
 import tempfile
-from typing import Dict, List
+from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 from pyxnat import Interface
 
@@ -80,8 +82,13 @@ def download_subject_from_xnat(subject: str, config: dict, output_root: Path):
         password = password or creds.get("password")
 
     if not username or not password:
+        creds = load_xnat_netrc_credentials(server)
+        username = username or creds.get("username")
+        password = password or creds.get("password")
+
+    if not username or not password:
         raise ValueError(
-            "XNAT credentials must be provided via xnat.credentials_file or xnat.username/xnat.password."
+            "XNAT credentials must be provided via xnat.credentials_file, xnat.username/xnat.password, or ~/.netrc."
         )
 
     session_map = {}
@@ -214,6 +221,24 @@ def load_xnat_credentials(credentials_file: str) -> Dict[str, str]:
         f"Unable to parse XNAT credentials from {path}. "
         "Use JSON or key=value pairs with username and password."
     )
+
+
+def load_xnat_netrc_credentials(server: str) -> Dict[str, str]:
+    parsed = urlparse(server)
+    host = parsed.hostname or server
+    try:
+        auths = netrc.netrc()
+    except Exception as exc:
+        raise ValueError(f"Unable to read ~/.netrc: {exc}")
+
+    if host not in auths.hosts:
+        raise ValueError(f"No credentials found for machine '{host}' in ~/.netrc.")
+
+    login, account, password = auths.authenticators(host)
+    if not login or not password:
+        raise ValueError(f"Incomplete credentials for machine '{host}' in ~/.netrc.")
+
+    return {"username": login, "password": password}
 
 
 def load_session_map(session_names_file: str, delimiter: Optional[str] = None) -> Dict[str, Dict[str, str]]:

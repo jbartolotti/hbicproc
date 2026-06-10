@@ -56,6 +56,8 @@ Set XNAT details in the `xnat` section of `pipeline_config.json`:
 - `xnat.output_dir`: local sourcedata directory.
 - `xnat.verify_ssl`: whether to verify TLS certificates.
 
+If `xnat.username` / `xnat.password` are not set and `xnat.credentials_file` is omitted, `hbicproc` will also attempt to read credentials from `~/.netrc` for the XNAT host.
+
 The credentials file may be JSON or simple key/value text. For example:
 
 ```json
@@ -69,11 +71,18 @@ username=MY_USER
 password=MY_PASSWORD
 ```
 
-The session mapping file should include a header row. Prefer using separate `subject` and `session` columns whenever possible:
+Alternatively, store credentials in a secure `~/.netrc` file (set file permisisons to only owner-read with 'chmod 600 ~/.netrc'):
+
+```
+machine xnat.kumc.edu login MY_USER password MY_PASSWORD
+```
+
+The session mapping file is used to manage inconsistent session naming. The file should include a header row. Prefer using separate `subject` and `session` columns whenever possible:
 
 ```
 session_sic	subject	session
-150975_011_BL	011	BL
+123456_001_T1	001	T1
+123456_001_Time2	001	T2
 ```
 
 If you instead have a combined session label such as `011_BL`, set `xnat.session_names_delimiter` to `_` in `pipeline_config.json`.
@@ -82,10 +91,11 @@ An example TSV file is included at `pipeline/session_names.example.tsv`.
 
 If `xnat.session_names_file` is provided, `hbicproc` uses it to map XNAT experiments to BIDS session IDs. If it is omitted, the pipeline will attempt to derive `ses-...` labels automatically from the XNAT experiment labels.
 
-Run `hbicproc download sub-011` to download all sessions for `sub-011` into:
+Run `hbicproc download sub-001` to download all sessions for `sub-001` into:
 
 ```
-sourcedata/sub-011/ses-011-BL
+sourcedata/sub-001/ses-T1
+sourcedata/sub-001/ses-T2
 ```
 
 ## MRIQC
