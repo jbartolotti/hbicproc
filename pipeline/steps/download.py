@@ -6,7 +6,7 @@ import netrc
 import re
 import shutil
 import tempfile
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from pyxnat import Interface
@@ -98,15 +98,20 @@ def download_subject_from_xnat(subject: str, config: dict, output_root: Path):
         session_map = load_session_map(session_names_file, delimiter=delimiter)
 
     subject_id = normalize_subject_label(subject)
+    mapped_xnat_subjects = find_xnat_subjects_for_requested_subject(subject_id, session_map)
+
     temp_root = Path(tempfile.mkdtemp(prefix=f"hbicproc_xnat_{subject_id}_"))
     try:
         interface = Interface(server=server, user=username, password=password, verify=verify_ssl)
         try:
-            experiments = list_subject_experiments(interface, project_id, subject_id)
-            if not experiments:
-                raise ValueError(f"No XNAT sessions found for subject '{subject}'.")
+            if mapped_xnat_subjects:
+                download_plan = build_download_plan_for_mapped_subjects(subject_id, mapped_xnat_subjects, interface, project_id)
+            else:
+                experiments = list_subject_experiments(interface, project_id, subject_id)
+                if not experiments:
+                    raise ValueError(f"No XNAT sessions found for subject '{subject}'.")
+                download_plan = build_download_plan(subject_id, experiments, session_map)
 
-            download_plan = build_download_plan(subject_id, experiments, session_map)
             if not download_plan:
                 raise ValueError(
                     f"Unable to derive any session labels for {subject}." 
@@ -116,9 +121,9 @@ def download_subject_from_xnat(subject: str, config: dict, output_root: Path):
             subject_temp_dir = temp_root / subject
             subject_temp_dir.mkdir(parents=True, exist_ok=True)
 
-            for exp_label, bids_session in download_plan.items():
+            for (xnat_subject_id, exp_label), bids_session in download_plan.items():
                 session_temp_dir = subject_temp_dir / bids_session
-                download_experiment(interface, project_id, subject_id, exp_label, session_temp_dir)
+                download_experiment(interface, project_id, xnat_subject_id, exp_label, session_temp_dir)
                 verify_downloaded_session(session_temp_dir)
 
             subject_output_dir = output_root / subject
@@ -276,6 +281,47 @@ def load_session_map(session_names_file: str, delimiter: Optional[str] = None) -
     return entries
 
 
+def find_xnat_subjects_for_requested_subject(subject_id: str, session_map: Dict[str, Dict[str, str]]) -> Dict[str, Dict[str, str]]:
+    return {
+        xnat_label: entry
+        for xnat_label, entry in session_map.items()
+        if entry.get("subject") and normalize_subject_label(entry.get("subject")) == subject_id
+    }
+
+
+def build_download_plan_for_mapped_subjects(
+    subject_id: str,
+    mapped_xnat_subjects: Dict[str, Dict[str, str]],
+    interface: Interface,
+    project_id: str,
+) -> Dict[Tuple[str, str], str]:
+    plan: Dict[Tuple[str, str], str] = {}
+    session_labels: Dict[str, str] = {}
+
+    for xnat_subject_id, entry in sorted(mapped_xnat_subjects.items()):
+        experiments = list_subject_experiments(interface, project_id, xnat_subject_id)
+        if not experiments:
+            raise ValueError(
+                f"No XNAT sessions found for mapped subject '{xnat_subject_id}' "
+                f"for requested subject '{subject_id}'."
+            )
+
+        session_value = entry.get("session_value") or xnat_subject_id
+        session_label = normalize_session_label(session_value, subject_id)
+
+        if session_label in session_labels and session_labels[session_label] != xnat_subject_id:
+            raise ValueError(
+                f"Duplicate BIDS session label '{session_label}' derived for "
+                f"XNAT subjects '{session_labels[session_label]}' and '{xnat_subject_id}'."
+            )
+        session_labels[session_label] = xnat_subject_id
+
+        for exp_label in sorted(experiments):
+            plan[(xnat_subject_id, exp_label)] = session_label
+
+    return plan
+
+
 def list_subject_experiments(interface: Interface, project_id: str, subject_id: str) -> List[str]:
     subject_obj = interface.select.project(project_id).subject(subject_id)
     if not subject_obj.exists():
@@ -290,8 +336,8 @@ def list_subject_experiments(interface: Interface, project_id: str, subject_id: 
     return _selection_get(fallback)
 
 
-def build_download_plan(subject_id: str, experiment_labels: List[str], session_map: Dict[str, Dict[str, str]]) -> Dict[str, str]:
-    plan = {}
+def build_download_plan(subject_id: str, experiment_labels: List[str], session_map: Dict[str, Dict[str, str]]) -> Dict[Tuple[str, str], str]:
+    plan: Dict[Tuple[str, str], str] = {}
     sessions_seen = set()
     for exp_label in sorted(experiment_labels):
         if exp_label in session_map:
@@ -307,7 +353,7 @@ def build_download_plan(subject_id: str, experiment_labels: List[str], session_m
                 f"Duplicate BIDS session label '{session_label}' derived from XNAT labels: {exp_label}."
             )
         sessions_seen.add(session_label)
-        plan[exp_label] = session_label
+        plan[(subject_id, exp_label)] = session_label
 
     return plan
 
