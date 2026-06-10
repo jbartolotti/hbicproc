@@ -344,12 +344,6 @@ def build_download_plan_for_mapped_subjects(
             )
 
         _debug_log(verbose, "Experiments found for XNAT subject '%s': %r", xnat_subject_id, experiments)
-        if xnat_label not in experiments:
-            _debug_log(verbose, "Mapped XNAT label '%s' not present as experiment under subject '%s'", xnat_label, xnat_subject_id)
-            raise ValueError(
-                f"XNAT experiment '{xnat_label}' not found under subject '{xnat_subject_id}' "
-                f"for requested subject '{subject_id}'."
-            )
 
         session_value = entry.get("session_value") or xnat_label
         session_label = normalize_session_label(session_value, subject_id)
@@ -362,7 +356,9 @@ def build_download_plan_for_mapped_subjects(
             )
         session_labels[session_label] = xnat_subject_id
 
-        plan[(xnat_subject_id, xnat_label)] = session_label
+        for exp_label in sorted(experiments):
+            _debug_log(verbose, "Adding experiment '%s' under XNAT subject '%s' to download plan", exp_label, xnat_subject_id)
+            plan[(xnat_subject_id, exp_label)] = session_label
 
     _debug_log(verbose, "Final download plan for mapped subjects: %r", plan)
     return plan
