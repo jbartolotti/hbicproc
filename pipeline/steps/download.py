@@ -149,7 +149,7 @@ def download_subject_from_xnat(subject: str, config: dict, output_root: Path):
 
             for (xnat_subject_id, exp_label), bids_session in download_plan.items():
                 session_temp_dir = subject_temp_dir / bids_session
-                download_experiment(interface, project_id, xnat_subject_id, exp_label, session_temp_dir)
+                download_experiment(interface, project_id, xnat_subject_id, exp_label, session_temp_dir, verbose=verbose)
                 verify_downloaded_session(session_temp_dir)
 
             subject_output_dir = output_root / subject
@@ -426,9 +426,56 @@ def build_download_plan(
     return plan
 
 
-def download_experiment(interface: Interface, project_id: str, subject_id: str, experiment_label: str, destination: Path):
+def download_experiment(interface: Interface, project_id: str, subject_id: str, experiment_label: str, destination: Path, verbose: bool = False):
     exp = interface.select.project(project_id).subject(subject_id).experiment(experiment_label)
     destination.mkdir(parents=True, exist_ok=True)
+
+    scans = exp.scans()
+    scan_labels = _selection_get(scans)
+    if scan_labels:
+        _debug_log(
+            verbose,
+            "Downloading experiment '%s' scans %r for subject '%s'",
+            experiment_label,
+            scan_labels,
+            subject_id,
+        )
+        files_downloaded = 0
+        for scan_label in sorted(scan_labels):
+            scan = exp.scan(scan_label)
+            scan_dir = destination / scan_label
+            scan_dir.mkdir(parents=True, exist_ok=True)
+
+            resources = scan.resources()
+            resource_names = _selection_get(resources)
+            if not resource_names:
+                _debug_log(verbose, "No resources found for scan '%s' in experiment '%s'", scan_label, experiment_label)
+                continue
+
+            for resource_name in sorted(resource_names):
+                resource = scan.resource(resource_name)
+                file_names = _selection_get(resource.files())
+                if not file_names:
+                    continue
+
+                if len(resource_names) == 1 and resource_name.lower() == "dicom":
+                    target_dir = scan_dir
+                else:
+                    target_dir = scan_dir / resource_name
+                target_dir.mkdir(parents=True, exist_ok=True)
+
+                for file_name in sorted(file_names):
+                    target_file = target_dir / file_name
+                    file_obj = resource.file(file_name)
+                    if hasattr(file_obj, "get_copy"):
+                        file_obj.get_copy(str(target_file))
+                    else:
+                        file_obj.get(str(target_file))
+                    files_downloaded += 1
+
+        if files_downloaded:
+            return
+        raise ValueError(f"No files were downloaded for experiment '{experiment_label}' under subject '{subject_id}'.")
 
     resources = exp.resources()
     resource_names = _selection_get(resources)
