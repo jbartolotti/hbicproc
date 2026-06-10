@@ -6,6 +6,7 @@ import netrc
 import re
 import shutil
 import tempfile
+import zipfile
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -426,6 +427,81 @@ def build_download_plan(
     return plan
 
 
+def _extract_and_squash_scans_archive(archive_path: Path, destination: Path, verbose: bool = False):
+    _debug_log(verbose, "Extracting scans archive %s to %s", archive_path, destination)
+    with zipfile.ZipFile(archive_path, "r") as zip_ref:
+        zip_ref.extractall(destination)
+
+    scan_root = destination / "scans"
+    if not scan_root.exists():
+        subdirs = [p for p in destination.iterdir() if p.is_dir()]
+        if len(subdirs) == 1 and (subdirs[0] / "scans").exists():
+            scan_root = subdirs[0] / "scans"
+        elif any(p.name.startswith("scans") and p.is_dir() for p in subdirs):
+            scan_root = next(p for p in subdirs if p.name.startswith("scans"))
+        else:
+            scan_root = destination
+
+    if scan_root.name == "scans":
+        for scan_dir in sorted(scan_root.iterdir()):
+            if not scan_dir.is_dir():
+                continue
+            target_dir = destination / scan_dir.name
+            if target_dir.exists():
+                shutil.rmtree(target_dir)
+            shutil.move(str(scan_dir), str(target_dir))
+        shutil.rmtree(scan_root, ignore_errors=True)
+
+    for scan_dir in sorted(destination.iterdir()):
+        if not scan_dir.is_dir():
+            continue
+        _flatten_scan_contents(scan_dir, verbose=verbose)
+
+    _cleanup_empty_dirs(destination)
+
+
+def _flatten_scan_contents(scan_dir: Path, verbose: bool = False):
+    _debug_log(verbose, "Flattening scan folder %s", scan_dir)
+    nested_files = [p for p in scan_dir.rglob("*") if p.is_file() and p.parent != scan_dir]
+    for file_path in nested_files:
+        target_file = scan_dir / file_path.name
+        suffix = 1
+        while target_file.exists():
+            target_file = scan_dir / f"{file_path.stem}_{suffix}{file_path.suffix}"
+            suffix += 1
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(file_path), str(target_file))
+    _cleanup_empty_dirs(scan_dir)
+
+
+def _download_resource_contents(resource, target_dir: Path, verbose: bool = False) -> int:
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if hasattr(resource, "get"):
+        try:
+            _debug_log(verbose, "Attempting bulk download for resource '%s' to %s", resource, target_dir)
+            resource.get(str(target_dir))
+            downloaded = len([p for p in target_dir.rglob("*") if p.is_file()])
+            if downloaded:
+                return downloaded
+        except Exception as exc:
+            _debug_log(verbose, "Bulk download failed for resource '%s': %s", resource, exc)
+
+    file_names = _selection_get(resource.files())
+    if not file_names:
+        return 0
+
+    downloaded = 0
+    for file_name in sorted(file_names):
+        target_file = target_dir / file_name
+        file_obj = resource.file(file_name)
+        if hasattr(file_obj, "get_copy"):
+            file_obj.get_copy(str(target_file))
+        else:
+            file_obj.get(str(target_file))
+        downloaded += 1
+    return downloaded
+
+
 def download_experiment(interface: Interface, project_id: str, subject_id: str, experiment_label: str, destination: Path, verbose: bool = False):
     exp = interface.select.project(project_id).subject(subject_id).experiment(experiment_label)
     destination.mkdir(parents=True, exist_ok=True)
@@ -440,64 +516,32 @@ def download_experiment(interface: Interface, project_id: str, subject_id: str, 
             scan_labels,
             subject_id,
         )
-        files_downloaded = 0
-        for scan_label in sorted(scan_labels):
-            scan = exp.scan(scan_label)
-            scan_dir = destination / scan_label
-            scan_dir.mkdir(parents=True, exist_ok=True)
-
-            resources = scan.resources()
-            resource_names = _selection_get(resources)
-            if not resource_names:
-                _debug_log(verbose, "No resources found for scan '%s' in experiment '%s'", scan_label, experiment_label)
-                continue
-
-            for resource_name in sorted(resource_names):
-                resource = scan.resource(resource_name)
-                file_names = _selection_get(resource.files())
-                if not file_names:
-                    continue
-
-                if len(resource_names) == 1 and resource_name.lower() == "dicom":
-                    target_dir = scan_dir
-                else:
-                    target_dir = scan_dir / resource_name
-                target_dir.mkdir(parents=True, exist_ok=True)
-
-                for file_name in sorted(file_names):
-                    target_file = target_dir / file_name
-                    file_obj = resource.file(file_name)
-                    if hasattr(file_obj, "get_copy"):
-                        file_obj.get_copy(str(target_file))
-                    else:
-                        file_obj.get(str(target_file))
-                    files_downloaded += 1
-
-        if files_downloaded:
-            return
-        raise ValueError(f"No files were downloaded for experiment '{experiment_label}' under subject '{subject_id}'.")
+        temp_dir = Path(tempfile.mkdtemp(prefix="hbicproc_xnat_scans_"))
+        try:
+            archive_path = scans.download(str(temp_dir), type="ALL", extract=False)
+            if isinstance(archive_path, (list, tuple)):
+                archive_path = archive_path[0]
+            archive_path = Path(archive_path)
+            if not archive_path.exists():
+                raise ValueError(f"Scan archive download failed; archive not found at {archive_path}")
+            _extract_and_squash_scans_archive(archive_path, destination, verbose=verbose)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        return
 
     resources = exp.resources()
     resource_names = _selection_get(resources)
     if not resource_names:
         raise ValueError(f"No resources found for experiment '{experiment_label}'.")
 
+    files_downloaded = 0
     for resource_name in sorted(resource_names):
         resource = exp.resource(resource_name)
-        files = resource.files()
-        file_names = _selection_get(files)
-        if not file_names:
-            continue
+        target_dir = destination / resource_name
+        files_downloaded += _download_resource_contents(resource, target_dir, verbose=verbose)
 
-        resource_dir = destination / resource_name
-        resource_dir.mkdir(parents=True, exist_ok=True)
-        for file_name in sorted(file_names):
-            target_file = resource_dir / file_name
-            file_obj = resource.file(file_name)
-            if hasattr(file_obj, "get_copy"):
-                file_obj.get_copy(str(target_file))
-            else:
-                file_obj.get(str(target_file))
+    if not files_downloaded:
+        raise ValueError(f"No files were downloaded for experiment '{experiment_label}' under subject '{subject_id}'.")
 
 
 def verify_downloaded_session(session_dir: Path):
