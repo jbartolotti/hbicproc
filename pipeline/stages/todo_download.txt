@@ -1,19 +1,14 @@
 TODO: download stage
 
 Goal:
-- Implement XNAT data retrieval for a single subject.
 - Support resume behavior by checking stage state before download.
 - Record downloaded state in sub-XXX/.pipeline_state.json.
 
 Tasks:
-- Verify the subject-level sourcedata path is correct: config['xnat']['output_dir']/subject.
-- Replace current stub behavior with actual XNAT API invocation or shell script execution.
-- Add failure handling and helpful error messages when the download fails.
 - Verify downloaded output files or folders exist after completion instead of trusting state only.
 - Ensure dry-run mode prints the exact command without executing it.
 - Add `--rerun` support to force a stage rerun and overwrite existing outputs.
 - Optionally support a batch mode if `hbicproc download --all` is later desired.
 
 Notes:
-- The `download` stage currently uses `Rscript` if `config['xnat']['script_path']` exists.
 - The stage should be idempotent and avoid re-downloading already completed subjects.

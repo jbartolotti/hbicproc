@@ -141,6 +141,12 @@ def main(argv=None):
             action="store_true",
             help="Re-run the stage and overwrite existing outputs regardless of previous completion.",
         )
+        if stage_name == "download":
+            stage_parser.add_argument(
+                "--summary",
+                action="store_true",
+                help="Print a summary of XNAT, session_names.tsv, and downloaded data.",
+            )
 
     status_parser = subparsers.add_parser("status", help="Generate a pipeline status figure across subjects and stages.")
     status_parser.add_argument(
@@ -186,6 +192,11 @@ def main(argv=None):
         return 0
 
     if args.command in ["download", "bidsify", "validate", "qc", "preprocess"]:
+        if args.command == "download" and args.summary:
+            from .steps.download import summarize_downloads
+
+            return summarize_downloads(config)
+
         if args.all:
             if args.subject:
                 parser.error("Cannot specify a subject and --all together.")

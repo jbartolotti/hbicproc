@@ -5,6 +5,7 @@ import json
 import netrc
 import re
 import shutil
+import sys
 import tempfile
 import zipfile
 from typing import Dict, List, Optional, Tuple
@@ -62,6 +63,154 @@ def run(subject, config, dry_run=False, rerun=False):
         "command": command,
         "returncode": 0,
     }
+
+
+def _get_xnat_credentials(config):
+    xnat_config = config["xnat"]
+    server = xnat_config.get("server")
+    project_id = xnat_config.get("project_id")
+    if not server or not project_id:
+        raise ValueError("xnat.server and xnat.project_id must be set in the pipeline config.")
+
+    credentials_file = xnat_config.get("credentials_file")
+    username = xnat_config.get("username")
+    password = xnat_config.get("password")
+
+    if credentials_file:
+        creds = load_xnat_credentials(credentials_file)
+        username = username or creds.get("username")
+        password = password or creds.get("password")
+
+    if not username or not password:
+        creds = load_xnat_netrc_credentials(server)
+        username = username or creds.get("username")
+        password = password or creds.get("password")
+
+    if not username or not password:
+        raise ValueError(
+            "XNAT credentials must be provided via xnat.credentials_file, xnat.username/xnat.password, or ~/.netrc."
+        )
+
+    return server, project_id, username, password, bool(xnat_config.get("verbose", False)), bool(xnat_config.get("verify_ssl", True))
+
+
+def summarize_downloads(config):
+    server, project_id, username, password, verbose, verify_ssl = _get_xnat_credentials(config)
+    session_names_file = config["xnat"].get("session_names_file")
+    delimiter = config["xnat"].get("session_names_delimiter")
+    session_map = load_session_map(session_names_file, delimiter=delimiter) if session_names_file else {}
+    output_root = Path(config["xnat"]["output_dir"])
+
+    xnat_sessions = set()
+    session_name_sessions = set()
+    disk_sessions = set()
+
+    interface = Interface(server=server, user=username, password=password, verify=verify_ssl)
+    try:
+        subjects = list_project_subjects(interface, project_id, verbose=verbose)
+        for raw_subject in sorted(subjects, key=lambda s: normalize_subject_label(str(s))):
+            subject_id = normalize_subject_label(str(raw_subject))
+            if not subject_id:
+                continue
+            try:
+                experiment_labels = list_subject_experiments(interface, project_id, subject_id, verbose=verbose)
+            except Exception as exc:
+                print(f"WARNING: Skipping XNAT subject '{raw_subject}': {exc}", file=sys.stderr)
+                continue
+
+            for exp_label in sorted(experiment_labels):
+                try:
+                    session_label, found_in_session_names = _derive_session_label_for_xnat_experiment(
+                        subject_id,
+                        exp_label,
+                        session_map,
+                    )
+                except Exception:
+                    session_label = normalize_session_label(exp_label, subject_id)
+                    found_in_session_names = False
+
+                xnat_sessions.add((subject_id, session_label))
+                if found_in_session_names:
+                    session_name_sessions.add((subject_id, session_label))
+
+        for xnat_label, entry in session_map.items():
+            subject_value = entry.get("subject")
+            if not subject_value:
+                continue
+            subject_id = normalize_subject_label(subject_value)
+            try:
+                session_label = normalize_session_label(entry.get("session_value"), subject_id)
+            except Exception:
+                continue
+            session_name_sessions.add((subject_id, session_label))
+
+        if output_root.exists() and output_root.is_dir():
+            for subject_dir in sorted(output_root.iterdir()):
+                if not subject_dir.is_dir():
+                    continue
+                subject_id = normalize_subject_label(subject_dir.name)
+                for session_dir in sorted(subject_dir.iterdir()):
+                    if not session_dir.is_dir():
+                        continue
+                    if any(session_dir.rglob("*")):
+                        disk_sessions.add((subject_id, session_dir.name))
+                    else:
+                        disk_sessions.add((subject_id, session_dir.name))
+    finally:
+        try:
+            interface.disconnect()
+        except Exception:
+            pass
+
+    all_keys = sorted(xnat_sessions | session_name_sessions | disk_sessions, key=lambda item: (item[0], item[1]))
+    if not all_keys:
+        print("No download summary entries found for the configured XNAT project.")
+        return 0
+
+    header = ["Subject", "Session", "In XNAT", "In session_names.tsv", "On disk"]
+    rows = []
+    for subject_id, session_label in all_keys:
+        rows.append(
+            [
+                f"sub-{subject_id}",
+                session_label,
+                "Yes" if (subject_id, session_label) in xnat_sessions else "No",
+                "Yes" if (subject_id, session_label) in session_name_sessions else "No",
+                "Yes" if (subject_id, session_label) in disk_sessions else "No",
+            ]
+        )
+
+    widths = [max(len(str(cell)) for cell in column) for column in zip(header, *rows)]
+    print("  ".join(h.ljust(w) for h, w in zip(header, widths)))
+    print("  ".join("-" * w for w in widths))
+    for row in rows:
+        print("  ".join(str(cell).ljust(widths[i]) for i, cell in enumerate(row)))
+
+    return 0
+
+
+def _derive_session_label_for_xnat_experiment(subject_id: str, exp_label: str, session_map: Dict[str, Dict[str, str]]):
+    if exp_label in session_map:
+        entry = session_map[exp_label]
+        entry_subject = entry.get("subject")
+        if entry_subject and normalize_subject_label(entry_subject) != subject_id:
+            return normalize_session_label(exp_label, subject_id), False
+        return normalize_session_label(entry.get("session_value") or exp_label, subject_id), True
+    return normalize_session_label(exp_label, subject_id), False
+
+
+def list_project_subjects(interface: Interface, project_id: str, verbose: bool = False):
+    project = interface.select.project(project_id)
+    if not project.exists():
+        raise ValueError(f"XNAT project '{project_id}' not found.")
+
+    subjects = project.subjects()
+    labels = _selection_get(subjects)
+    if labels:
+        return labels
+
+    fallback = interface.select(f"/projects/{project_id}/subjects/*")
+    return _selection_get(fallback)
 
 
 def download_subject_from_xnat(subject: str, config: dict, output_root: Path):
