@@ -215,6 +215,7 @@ def summarize_downloads(config):
                 session_label,
                 "",
                 "No",
+                "No",
                 "Yes",
             ])
 
