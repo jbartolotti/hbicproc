@@ -101,9 +101,9 @@ def summarize_downloads(config):
     session_map = load_session_map(session_names_file, delimiter=delimiter) if session_names_file else {}
     output_root = Path(config["xnat"]["output_dir"])
 
-    xnat_sessions = set()
-    session_name_sessions = set()
     disk_sessions = set()
+    xnat_records = []
+    session_name_entries = {}
 
     interface = Interface(server=server, user=username, password=password, verify=verify_ssl)
     try:
@@ -113,73 +113,117 @@ def summarize_downloads(config):
             if not subject_id:
                 continue
             try:
-                experiment_labels = list_subject_experiments(interface, project_id, subject_id, verbose=verbose)
+                experiment_ids = list_subject_experiments(interface, project_id, subject_id, verbose=verbose)
             except Exception as exc:
                 print(f"WARNING: Skipping XNAT subject '{raw_subject}': {exc}", file=sys.stderr)
                 continue
 
-            for exp_label in sorted(experiment_labels):
-                try:
-                    session_label, found_in_session_names = _derive_session_label_for_xnat_experiment(
-                        subject_id,
-                        exp_label,
-                        session_map,
-                    )
-                except Exception:
-                    session_label = normalize_session_label(exp_label, subject_id)
-                    found_in_session_names = False
+            for exp_id in sorted(experiment_ids):
+                xnat_session_name = get_xnat_experiment_label(interface, project_id, subject_id, exp_id, verbose=verbose)
+                mapped = session_map.get(xnat_session_name)
+                if mapped:
+                    mapped_subject = normalize_subject_label(mapped.get("subject") or subject_id)
+                    try:
+                        session_label = normalize_session_label(mapped.get("session_value"), mapped_subject)
+                    except Exception:
+                        session_label = normalize_session_label(xnat_session_name, mapped_subject)
+                    in_session_names = True
+                else:
+                    mapped_subject = subject_id
+                    try:
+                        session_label = normalize_session_label(xnat_session_name, mapped_subject)
+                    except Exception:
+                        session_label = xnat_session_name
+                    in_session_names = False
 
-                xnat_sessions.add((subject_id, session_label))
-                if found_in_session_names:
-                    session_name_sessions.add((subject_id, session_label))
+                bids_subject = f"sub-{mapped_subject}"
+                xnat_records.append({
+                    "subject": bids_subject,
+                    "session": session_label,
+                    "xnat_session": xnat_session_name,
+                    "in_xnat": True,
+                    "in_session_names": in_session_names,
+                })
 
         for xnat_label, entry in session_map.items():
             subject_value = entry.get("subject")
             if not subject_value:
                 continue
-            subject_id = normalize_subject_label(subject_value)
+            mapped_subject = normalize_subject_label(subject_value)
             try:
-                session_label = normalize_session_label(entry.get("session_value"), subject_id)
+                session_label = normalize_session_label(entry.get("session_value"), mapped_subject)
             except Exception:
                 continue
-            session_name_sessions.add((subject_id, session_label))
+            bids_subject = f"sub-{mapped_subject}"
+            key = (bids_subject, session_label, xnat_label)
+            session_name_entries[key] = {
+                "subject": bids_subject,
+                "session": session_label,
+                "xnat_session": xnat_label,
+                "in_xnat": False,
+                "in_session_names": True,
+            }
 
         if output_root.exists() and output_root.is_dir():
             for subject_dir in sorted(output_root.iterdir()):
                 if not subject_dir.is_dir():
                     continue
                 subject_id = normalize_subject_label(subject_dir.name)
+                bids_subject = f"sub-{subject_id}"
                 for session_dir in sorted(subject_dir.iterdir()):
                     if not session_dir.is_dir():
                         continue
-                    if any(session_dir.rglob("*")):
-                        disk_sessions.add((subject_id, session_dir.name))
-                    else:
-                        disk_sessions.add((subject_id, session_dir.name))
+                    session_label = session_dir.name
+                    disk_sessions.add((bids_subject, session_label))
     finally:
         try:
             interface.disconnect()
         except Exception:
             pass
 
-    all_keys = sorted(xnat_sessions | session_name_sessions | disk_sessions, key=lambda item: (item[0], item[1]))
-    if not all_keys:
+    rows = []
+    seen = set()
+    for record in xnat_records:
+        disk_key = (record["subject"], record["session"])
+        rows.append([
+            record["subject"],
+            record["session"],
+            record["xnat_session"],
+            "Yes" if record["in_xnat"] else "No",
+            "Yes" if record["in_session_names"] else "No",
+            "Yes" if disk_key in disk_sessions else "No",
+        ])
+        seen.add((record["subject"], record["session"], record["xnat_session"]))
+
+    for key, record in session_name_entries.items():
+        if key in seen:
+            continue
+        disk_key = (record["subject"], record["session"])
+        rows.append([
+            record["subject"],
+            record["session"],
+            record["xnat_session"],
+            "Yes" if record["in_xnat"] else "No",
+            "Yes" if record["in_session_names"] else "No",
+            "Yes" if disk_key in disk_sessions else "No",
+        ])
+
+    for bids_subject, session_label in sorted(disk_sessions):
+        if not any(r[0] == bids_subject and r[1] == session_label for r in rows):
+            rows.append([
+                bids_subject,
+                session_label,
+                "",
+                "No",
+                "Yes",
+            ])
+
+    if not rows:
         print("No download summary entries found for the configured XNAT project.")
         return 0
 
-    header = ["Subject", "Session", "In XNAT", "In session_names.tsv", "On disk"]
-    rows = []
-    for subject_id, session_label in all_keys:
-        rows.append(
-            [
-                f"sub-{subject_id}",
-                session_label,
-                "Yes" if (subject_id, session_label) in xnat_sessions else "No",
-                "Yes" if (subject_id, session_label) in session_name_sessions else "No",
-                "Yes" if (subject_id, session_label) in disk_sessions else "No",
-            ]
-        )
-
+    rows.sort(key=lambda r: (r[0], r[1], r[2]))
+    header = ["Subject", "Session", "XNAT Session", "In XNAT", "In session_names.tsv", "On disk"]
     widths = [max(len(str(cell)) for cell in column) for column in zip(header, *rows)]
     print("  ".join(h.ljust(w) for h, w in zip(header, widths)))
     print("  ".join("-" * w for w in widths))
@@ -187,6 +231,26 @@ def summarize_downloads(config):
         print("  ".join(str(cell).ljust(widths[i]) for i, cell in enumerate(row)))
 
     return 0
+
+
+def get_xnat_experiment_label(interface: Interface, project_id: str, subject_id: str, experiment_id: str, verbose: bool = False) -> str:
+    exp = interface.select.project(project_id).subject(subject_id).experiment(experiment_id)
+    label = None
+    try:
+        if hasattr(exp, "label"):
+            label = exp.label()
+    except Exception as exc:
+        _debug_log(verbose, "Unable to read experiment label for %s: %s", experiment_id, exc)
+
+    if not label:
+        try:
+            attrs = getattr(exp, "attrs", None)
+            if attrs and hasattr(attrs, "get"):
+                label = attrs.get("label")
+        except Exception as exc:
+            _debug_log(verbose, "Unable to read experiment attrs for %s: %s", experiment_id, exc)
+
+    return str(label) if label else str(experiment_id)
 
 
 def _derive_session_label_for_xnat_experiment(subject_id: str, exp_label: str, session_map: Dict[str, Dict[str, str]]):
