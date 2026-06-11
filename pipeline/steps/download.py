@@ -128,7 +128,25 @@ def _disk_sessions(output_root: Path) -> set[tuple[str, str]]:
     return sessions
 
 
+def _normalize_xnat_subject_id(subject_label: str) -> str:
+    if not subject_label:
+        return ""
+    if "/" in subject_label:
+        subject_label = subject_label.split("/", 1)[0]
+    return normalize_subject_label(subject_label)
+
+
+def _normalize_xnat_experiment_label(experiment_label: str) -> str:
+    if not experiment_label:
+        return ""
+    if "/" in experiment_label:
+        experiment_label = experiment_label.split("/", 1)[-1]
+    return experiment_label.strip()
+
+
 def _xnat_experiment_exists(interface: Interface, project_id: str, subject_id: str, experiment_label: str, verbose: bool = False) -> bool:
+    subject_id = _normalize_xnat_subject_id(subject_id)
+    experiment_label = _normalize_xnat_experiment_label(experiment_label)
     try:
         exp = interface.select.project(project_id).subject(subject_id).experiment(experiment_label)
         exists = exp.exists()
@@ -161,7 +179,7 @@ def download_all(config, dry_run=False, rerun=False):
             skipped += 1
             continue
 
-        subject_id = normalize_subject_label(subject_value)
+        subject_id = _normalize_xnat_subject_id(subject_value)
         session_name = _raw_session_name(entry.get("session_value"), subject_id)
         if not session_name:
             print(f"WARNING: session_names entry '{xnat_label}' has invalid session value; skipping.")
@@ -173,7 +191,7 @@ def download_all(config, dry_run=False, rerun=False):
             continue
 
         plan.append({
-            "xnat_label": xnat_label,
+            "xnat_label": _normalize_xnat_experiment_label(xnat_label),
             "subject_id": subject_id,
             "session_name": session_name,
         })
@@ -198,10 +216,12 @@ def download_all(config, dry_run=False, rerun=False):
     available = []
     missing = []
     for entry in plan:
-        if _xnat_experiment_exists(interface, project_id, entry["subject_id"], entry["xnat_label"], verbose=verbose):
-            available.append(entry)
+        subject_id = _normalize_xnat_subject_id(entry["subject_id"])
+        xnat_label = _normalize_xnat_experiment_label(entry["xnat_label"])
+        if _xnat_experiment_exists(interface, project_id, subject_id, xnat_label, verbose=verbose):
+            available.append({**entry, "subject_id": subject_id, "xnat_label": xnat_label})
         else:
-            missing.append(entry)
+            missing.append({**entry, "subject_id": subject_id, "xnat_label": xnat_label})
 
     for entry in missing:
         print(
@@ -272,6 +292,10 @@ def _update_subject_downloaded_states(config, session_map, output_root: Path):
             state = load_subject_state(Path(config["study_root"]) / subject_label, config=config)
             state["downloaded"] = True
             save_subject_state(Path(config["study_root"]) / subject_label, state, config=config)
+    return
+
+
+def summarize_downloads(config):
     server, project_id, username, password, verbose, verify_ssl = _get_xnat_credentials(config)
     session_names_file = config["xnat"].get("session_names_file")
     delimiter = config["xnat"].get("session_names_delimiter")
