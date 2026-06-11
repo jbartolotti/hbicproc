@@ -136,10 +136,11 @@ def summarize_downloads(config):
                         session_label = xnat_session_name
                     in_session_names = False
 
-                bids_subject = f"sub-{mapped_subject}"
+                subject_value = mapped_subject
+                session_value = strip_session_prefix(session_label)
                 xnat_records.append({
-                    "subject": bids_subject,
-                    "session": session_label,
+                    "subject": subject_value,
+                    "session": session_value,
                     "xnat_session": xnat_session_name,
                     "in_xnat": True,
                     "in_session_names": in_session_names,
@@ -154,11 +155,11 @@ def summarize_downloads(config):
                 session_label = normalize_session_label(entry.get("session_value"), mapped_subject)
             except Exception:
                 continue
-            bids_subject = f"sub-{mapped_subject}"
-            key = (bids_subject, session_label, xnat_label)
+            session_value = strip_session_prefix(session_label)
+            key = (mapped_subject, session_value, xnat_label)
             session_name_entries[key] = {
-                "subject": bids_subject,
-                "session": session_label,
+                "subject": mapped_subject,
+                "session": session_value,
                 "xnat_session": xnat_label,
                 "in_xnat": False,
                 "in_session_names": True,
@@ -169,12 +170,11 @@ def summarize_downloads(config):
                 if not subject_dir.is_dir():
                     continue
                 subject_id = normalize_subject_label(subject_dir.name)
-                bids_subject = f"sub-{subject_id}"
                 for session_dir in sorted(subject_dir.iterdir()):
                     if not session_dir.is_dir():
                         continue
-                    session_label = session_dir.name
-                    disk_sessions.add((bids_subject, session_label))
+                    session_label = strip_session_prefix(session_dir.name)
+                    disk_sessions.add((subject_id, session_label))
     finally:
         try:
             interface.disconnect()
@@ -208,10 +208,10 @@ def summarize_downloads(config):
             "Yes" if disk_key in disk_sessions else "No",
         ])
 
-    for bids_subject, session_label in sorted(disk_sessions):
-        if not any(r[0] == bids_subject and r[1] == session_label for r in rows):
+    for subject_id, session_label in sorted(disk_sessions):
+        if not any(r[0] == subject_id and r[1] == session_label for r in rows):
             rows.append([
-                bids_subject,
+                subject_id,
                 session_label,
                 "",
                 "No",
@@ -363,7 +363,8 @@ def download_subject_from_xnat(subject: str, config: dict, output_root: Path):
             subject_temp_dir.mkdir(parents=True, exist_ok=True)
 
             for (xnat_subject_id, exp_label), bids_session in download_plan.items():
-                session_temp_dir = subject_temp_dir / bids_session
+                session_name = strip_session_prefix(bids_session)
+                session_temp_dir = subject_temp_dir / session_name
                 download_experiment(interface, project_id, xnat_subject_id, exp_label, session_temp_dir, verbose=verbose)
                 verify_downloaded_session(session_temp_dir)
 
@@ -388,6 +389,13 @@ def normalize_subject_label(subject: str) -> str:
     if subject.lower().startswith("sub-"):
         return subject[4:]
     return subject
+
+
+def strip_session_prefix(session_label: str) -> str:
+    session_label = session_label.strip()
+    if session_label.lower().startswith("ses-"):
+        return session_label[4:]
+    return session_label
 
 
 def normalize_session_label(session_value: str, subject_id: str) -> str:
