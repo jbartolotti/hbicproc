@@ -237,7 +237,7 @@ def download_all(config, dry_run=False, rerun=False):
     print(f"{len(existing_sessions)} sessions are already on disk.")
     print(f"Preparing to download {len(plan)} sessions:")
     for entry in plan:
-        print(f"  {entry['subject_id']} {entry['session_name']}")
+        print(f"  {entry['output_subject']} {entry['session_name']}")
 
     if dry_run:
         print("Dry run: no downloads will be performed.")
