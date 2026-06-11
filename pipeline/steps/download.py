@@ -7,11 +7,13 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import zipfile
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from pyxnat import Interface
+from ..state import load_subject_state, save_subject_state, update_session_state
 
 
 def run(subject, config, dry_run=False, rerun=False):
@@ -94,7 +96,182 @@ def _get_xnat_credentials(config):
     return server, project_id, username, password, bool(xnat_config.get("verbose", False)), bool(xnat_config.get("verify_ssl", True))
 
 
-def summarize_downloads(config):
+def _format_duration(seconds: float) -> str:
+    seconds = int(seconds)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m{seconds:02d}s"
+    if minutes:
+        return f"{minutes}m{seconds:02d}s"
+    return f"{seconds}s"
+
+
+def _raw_session_name(session_value: str, subject_id: str) -> str:
+    return strip_session_prefix(normalize_session_label(session_value, subject_id))
+
+
+def _disk_sessions(output_root: Path) -> set[tuple[str, str]]:
+    sessions = set()
+    if not output_root.exists() or not output_root.is_dir():
+        return sessions
+    for subject_dir in sorted(output_root.iterdir()):
+        if not subject_dir.is_dir():
+            continue
+        subject_id = normalize_subject_label(subject_dir.name)
+        for session_dir in sorted(subject_dir.iterdir()):
+            if not session_dir.is_dir():
+                continue
+            session_name = strip_session_prefix(session_dir.name)
+            if any(session_dir.rglob("*")):
+                sessions.add((subject_id, session_name))
+    return sessions
+
+
+def _xnat_experiment_exists(interface: Interface, project_id: str, subject_id: str, experiment_label: str, verbose: bool = False) -> bool:
+    try:
+        exp = interface.select.project(project_id).subject(subject_id).experiment(experiment_label)
+        exists = exp.exists()
+        _debug_log(verbose, "XNAT experiment exists check for %s/%s: %s", subject_id, experiment_label, exists)
+        return bool(exists)
+    except Exception as exc:
+        _debug_log(verbose, "Unable to verify experiment %s for subject %s: %s", experiment_label, subject_id, exc)
+        return False
+
+
+def download_all(config, dry_run=False, rerun=False):
+    xnat_config = config["xnat"]
+    session_names_file = xnat_config.get("session_names_file")
+    if not session_names_file:
+        raise ValueError("xnat.session_names_file is required for --all.")
+
+    delimiter = xnat_config.get("session_names_delimiter")
+    session_map = load_session_map(session_names_file, delimiter=delimiter)
+    output_root = Path(xnat_config["output_dir"])
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    existing_sessions = _disk_sessions(output_root)
+    plan = []
+    skipped = 0
+
+    for xnat_label, entry in sorted(session_map.items()):
+        subject_value = entry.get("subject")
+        if not subject_value:
+            print(f"WARNING: session_names entry '{xnat_label}' has no subject; skipping.")
+            skipped += 1
+            continue
+
+        subject_id = normalize_subject_label(subject_value)
+        session_name = _raw_session_name(entry.get("session_value"), subject_id)
+        if not session_name:
+            print(f"WARNING: session_names entry '{xnat_label}' has invalid session value; skipping.")
+            skipped += 1
+            continue
+
+        if not rerun and (subject_id, session_name) in existing_sessions:
+            skipped += 1
+            continue
+
+        plan.append({
+            "xnat_label": xnat_label,
+            "subject_id": subject_id,
+            "session_name": session_name,
+        })
+
+    if not plan:
+        print("No sessions need downloading from session_names.tsv.")
+        return 0
+
+    print(f"Found {len(session_map)} session mappings in {session_names_file}.")
+    print(f"{len(existing_sessions)} sessions are already on disk.")
+    print(f"Preparing to download {len(plan)} sessions:")
+    for entry in plan:
+        print(f"  {entry['subject_id']} {entry['session_name']}")
+
+    if dry_run:
+        print("Dry run: no downloads will be performed.")
+        return 0
+
+    server, project_id, username, password, verbose, verify_ssl = _get_xnat_credentials(config)
+    interface = Interface(server=server, user=username, password=password, verify=verify_ssl)
+
+    available = []
+    missing = []
+    for entry in plan:
+        if _xnat_experiment_exists(interface, project_id, entry["subject_id"], entry["xnat_label"], verbose=verbose):
+            available.append(entry)
+        else:
+            missing.append(entry)
+
+    for entry in missing:
+        print(
+            f"WARNING: XNAT experiment not found for subject {entry['subject_id']} session {entry['session_name']} "
+            f"({entry['xnat_label']})."
+        )
+
+    if not available:
+        print("No available XNAT sessions to download.")
+        return 1
+
+    total = len(available)
+    completed = 0
+    elapsed_total = 0.0
+    for index, entry in enumerate(available, start=1):
+        subject_id = entry["subject_id"]
+        session_name = entry["session_name"]
+        xnat_label = entry["xnat_label"]
+        print(f"download {index}/{total}, {subject_id} {session_name}")
+
+        destination = output_root / subject_id / session_name
+        if destination.exists() and rerun:
+            shutil.rmtree(destination)
+
+        start = time.perf_counter()
+        try:
+            download_experiment(interface, project_id, subject_id, xnat_label, destination, verbose=verbose)
+        except Exception as exc:
+            print(f"ERROR: Download failed for {subject_id} {session_name}: {exc}", file=sys.stderr)
+            return 1
+        duration = time.perf_counter() - start
+        elapsed_total += duration
+        completed += 1
+
+        update_session_state(config, f"sub-{subject_id}", session_name, {"downloaded": True, "xnat_label": xnat_label})
+
+        remaining = total - completed
+        if remaining:
+            average = elapsed_total / completed
+            eta = average * remaining
+            print(f"Estimated time remaining: {_format_duration(eta)}")
+        else:
+            print("Download complete.")
+
+    _update_subject_downloaded_states(config, session_map, output_root)
+
+    return 0
+
+
+def _update_subject_downloaded_states(config, session_map, output_root: Path):
+    downloaded_sessions = _disk_sessions(output_root)
+    subject_sessions = {}
+    for xnat_label, entry in session_map.items():
+        subject_value = entry.get("subject")
+        if not subject_value:
+            continue
+        subject_id = normalize_subject_label(subject_value)
+        session_name = _raw_session_name(entry.get("session_value"), subject_id)
+        if not session_name:
+            continue
+        subject_sessions.setdefault(subject_id, []).append(session_name)
+
+    for subject_id, sessions in subject_sessions.items():
+        expected = set(sessions)
+        actual = {session for (subject, session) in downloaded_sessions if subject == subject_id}
+        if expected and expected.issubset(actual):
+            subject_label = f"sub-{subject_id}"
+            state = load_subject_state(Path(config["study_root"]) / subject_label, config=config)
+            state["downloaded"] = True
+            save_subject_state(Path(config["study_root"]) / subject_label, state, config=config)
     server, project_id, username, password, verbose, verify_ssl = _get_xnat_credentials(config)
     session_names_file = config["xnat"].get("session_names_file")
     delimiter = config["xnat"].get("session_names_delimiter")

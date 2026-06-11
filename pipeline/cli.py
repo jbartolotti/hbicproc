@@ -100,9 +100,9 @@ def _subject_exclusion(subject, config, runs, clear):
     if save_exclusions:
         exclusions_file.parent.mkdir(parents=True, exist_ok=True)
         write_json(exclusions_file, exclusions)
-        state = load_subject_state(Path(config["study_root"]) / subject)
+        state = load_subject_state(Path(config["study_root"]) / subject, config=config)
         state["qc_reviewed"] = True
-        save_subject_state(Path(config["study_root"]) / subject, state)
+        save_subject_state(Path(config["study_root"]) / subject, state, config=config)
 
     print(f"Recorded exclusions for {subject} in {exclusions_file}")
     print("QC review is now complete for this subject.")
@@ -192,7 +192,15 @@ def main(argv=None):
         return 0
 
     if args.command in ["download", "bidsify", "validate", "qc", "preprocess"]:
-        if args.command == "download" and args.summary:
+if args.command == "download" and args.summary and args.all:
+        parser.error("Cannot specify --summary and --all together.")
+
+    if args.command == "download" and args.all:
+        from .steps.download import download_all
+
+        return download_all(config, dry_run=args.dry_run, rerun=args.rerun)
+
+    if args.command == "download" and args.summary:
             from .steps.download import summarize_downloads
 
             return summarize_downloads(config)

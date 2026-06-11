@@ -24,10 +24,10 @@ class PipelineRunner:
         return subject_dir(self.config, subject)
 
     def load_state(self, subject):
-        return load_subject_state(self.subject_path(subject))
+        return load_subject_state(self.subject_path(subject), config=self.config)
 
     def save_state(self, subject, state):
-        save_subject_state(self.subject_path(subject), state)
+        save_subject_state(self.subject_path(subject), state, config=self.config)
 
     def get_next_stage(self, state):
         for stage_name in self.stage_order:

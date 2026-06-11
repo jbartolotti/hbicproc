@@ -24,7 +24,7 @@ def _find_subject_rows(config):
 def _state_matrix(config, rows, stage_names):
     matrix = []
     for subject, session in rows:
-        state = load_subject_state(Path(config["study_root"]) / subject)
+        state = load_subject_state(Path(config["study_root"]) / subject, config=config)
         row = [bool(state.get(stage)) for stage in stage_names]
         matrix.append(row)
     return matrix
@@ -102,6 +102,6 @@ def save_pipeline_status_figure(config, output_path=None):
     if output_path:
         output_file = Path(output_path)
     else:
-        output_file = Path(config["study_root"]) / "code" / "pipeline_status.svg"
+        output_file = get_bids_root(config) / "code" / "pipeline_status.svg"
 
     return _make_svg(rows, stage_names, matrix, output_file)
