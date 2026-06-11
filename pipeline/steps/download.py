@@ -148,55 +148,6 @@ def _clean_label(label: str) -> str:
     return re.sub(r"[^a-z0-9]", "", label.lower()) if label else ""
 
 
-def _build_subject_experiment_index(interface: Interface, project_id: str, verbose: bool = False) -> Dict[str, List[str]]:
-    index: Dict[str, List[str]] = {}
-    subjects = list_project_subjects(interface, project_id, verbose=verbose)
-    for raw_subject in sorted(subjects, key=lambda s: str(s)):
-        try:
-            experiment_ids = list_subject_experiments(interface, project_id, raw_subject, verbose=verbose)
-        except Exception as exc:
-            _debug_log(verbose, "Skipping subject %s while building index: %s", raw_subject, exc)
-            continue
-        index[str(raw_subject)] = experiment_ids
-    return index
-
-
-def _find_xnat_subject_and_experiment_for_session_sic(
-    interface: Interface,
-    project_id: str,
-    session_sic: str,
-    subject_experiments: Dict[str, List[str]],
-    verbose: bool = False,
-) -> Optional[Tuple[str, str]]:
-    session_sic = _normalize_xnat_experiment_label(session_sic)
-    cleaned_target = _clean_label(session_sic)
-
-    for raw_subject, experiment_ids in subject_experiments.items():
-        exact_matches = [exp_id for exp_id in experiment_ids if exp_id == session_sic]
-        if len(exact_matches) == 1:
-            return raw_subject, exact_matches[0]
-
-        fuzzy_matches = [exp_id for exp_id in experiment_ids if _clean_label(exp_id) == cleaned_target]
-        if len(fuzzy_matches) == 1:
-            return raw_subject, fuzzy_matches[0]
-
-        if exact_matches:
-            return raw_subject, exact_matches[0]
-        if fuzzy_matches:
-            return raw_subject, fuzzy_matches[0]
-
-    for raw_subject, experiment_ids in subject_experiments.items():
-        for exp_id in experiment_ids:
-            try:
-                actual_label = get_xnat_experiment_label(interface, project_id, raw_subject, exp_id, verbose=verbose)
-            except Exception:
-                continue
-            if actual_label == session_sic or _clean_label(actual_label) == cleaned_target:
-                return raw_subject, exp_id
-
-    return None
-
-
 def _xnat_experiment_exists(interface: Interface, project_id: str, subject_id: str, experiment_label: str, verbose: bool = False) -> bool:
     subject_id = _normalize_xnat_subject_id(subject_id)
     experiment_label = _normalize_xnat_experiment_label(experiment_label)
@@ -265,34 +216,38 @@ def download_all(config, dry_run=False, rerun=False):
 
     server, project_id, username, password, verbose, verify_ssl = _get_xnat_credentials(config)
     interface = Interface(server=server, user=username, password=password, verify=verify_ssl)
-    subject_experiments = _build_subject_experiment_index(interface, project_id, verbose=verbose)
 
     available = []
     missing = []
     for entry in plan:
         output_subject = entry["output_subject"]
         session_sic = _normalize_xnat_experiment_label(entry["session_sic"])
-        result = _find_xnat_subject_and_experiment_for_session_sic(
-            interface,
-            project_id,
-            session_sic,
-            subject_experiments,
-            verbose=verbose,
-        )
-        if result:
-            xnat_subject, experiment_id = result
-            available.append({
-                **entry,
-                "xnat_subject": xnat_subject,
-                "session_sic": session_sic,
-                "experiment_id": experiment_id,
-            })
-        else:
+        xnat_subject = session_sic
+        try:
+            experiment_ids = list_subject_experiments(interface, project_id, xnat_subject, verbose=verbose)
+        except Exception as exc:
+            _debug_log(verbose, "XNAT subject lookup failed for %s: %s", xnat_subject, exc)
             missing.append({
                 **entry,
                 "xnat_subject": None,
                 "session_sic": session_sic,
             })
+            continue
+
+        if not experiment_ids:
+            missing.append({
+                **entry,
+                "xnat_subject": None,
+                "session_sic": session_sic,
+            })
+            continue
+
+        available.append({
+            **entry,
+            "xnat_subject": xnat_subject,
+            "session_sic": session_sic,
+            "experiment_ids": experiment_ids,
+        })
 
     for entry in missing:
         print(
@@ -312,7 +267,7 @@ def download_all(config, dry_run=False, rerun=False):
         xnat_subject = entry["xnat_subject"]
         session_name = entry["session_name"]
         session_sic = entry["session_sic"]
-        experiment_id = entry["experiment_id"]
+        experiment_ids = entry["experiment_ids"]
         print(f"download {index}/{total}, {output_subject} {session_name}")
 
         destination = output_root / output_subject / session_name
@@ -321,7 +276,8 @@ def download_all(config, dry_run=False, rerun=False):
 
         start = time.perf_counter()
         try:
-            download_experiment(interface, project_id, xnat_subject, experiment_id, destination, verbose=verbose)
+            for experiment_id in experiment_ids:
+                download_experiment(interface, project_id, xnat_subject, experiment_id, destination, verbose=verbose)
         except Exception as exc:
             print(f"ERROR: Download failed for {output_subject} {session_name}: {exc}", file=sys.stderr)
             return 1
