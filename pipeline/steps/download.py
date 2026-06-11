@@ -148,34 +148,31 @@ def _clean_label(label: str) -> str:
     return re.sub(r"[^a-z0-9]", "", label.lower()) if label else ""
 
 
-def _find_xnat_experiment_for_session_sic(interface: Interface, project_id: str, subject_id: str, session_sic: str, verbose: bool = False) -> Optional[str]:
-    subject_id = _normalize_xnat_subject_id(subject_id)
+def _find_xnat_subject_and_experiment_for_session_sic(interface: Interface, project_id: str, session_sic: str, verbose: bool = False) -> Optional[Tuple[str, str]]:
     session_sic = _normalize_xnat_experiment_label(session_sic)
-    experiment_ids = list_subject_experiments(interface, project_id, subject_id, verbose=verbose)
-    if not experiment_ids:
-        return None
-
-    exact_matches = [exp_id for exp_id in experiment_ids if exp_id == session_sic]
-    if len(exact_matches) == 1:
-        return exact_matches[0]
-
     cleaned_target = _clean_label(session_sic)
-    fuzzy_matches = [exp_id for exp_id in experiment_ids if _clean_label(exp_id) == cleaned_target]
-    if len(fuzzy_matches) == 1:
-        return fuzzy_matches[0]
-
-    if exact_matches:
-        return exact_matches[0]
-    if fuzzy_matches:
-        return fuzzy_matches[0]
-
-    for exp_id in experiment_ids:
+    subjects = list_project_subjects(interface, project_id, verbose=verbose)
+    for raw_subject in sorted(subjects, key=lambda s: str(s)):
         try:
-            actual_label = get_xnat_experiment_label(interface, project_id, subject_id, exp_id, verbose=verbose)
+            experiment_ids = list_subject_experiments(interface, project_id, raw_subject, verbose=verbose)
         except Exception:
             continue
-        if actual_label == session_sic or _clean_label(actual_label) == cleaned_target:
-            return exp_id
+
+        exact_matches = [exp_id for exp_id in experiment_ids if exp_id == session_sic]
+        if len(exact_matches) == 1:
+            return raw_subject, exact_matches[0]
+
+        fuzzy_matches = [exp_id for exp_id in experiment_ids if _clean_label(exp_id) == cleaned_target]
+        if len(fuzzy_matches) == 1:
+            return raw_subject, fuzzy_matches[0]
+
+        for exp_id in experiment_ids:
+            try:
+                actual_label = get_xnat_experiment_label(interface, project_id, raw_subject, exp_id, verbose=verbose)
+            except Exception:
+                continue
+            if actual_label == session_sic or _clean_label(actual_label) == cleaned_target:
+                return raw_subject, exp_id
 
     return None
 
@@ -228,7 +225,7 @@ def download_all(config, dry_run=False, rerun=False):
 
         plan.append({
             "session_sic": _normalize_xnat_experiment_label(xnat_label),
-            "subject_id": subject_id,
+            "output_subject": subject_id,
             "session_name": session_name,
         })
 
@@ -252,17 +249,31 @@ def download_all(config, dry_run=False, rerun=False):
     available = []
     missing = []
     for entry in plan:
-        subject_id = _normalize_xnat_subject_id(entry["subject_id"])
+        output_subject = entry["output_subject"]
         session_sic = _normalize_xnat_experiment_label(entry["session_sic"])
-        experiment_id = _find_xnat_experiment_for_session_sic(interface, project_id, subject_id, session_sic, verbose=verbose)
-        if experiment_id:
-            available.append({**entry, "subject_id": subject_id, "session_sic": session_sic, "experiment_id": experiment_id})
+        xnat_subject, experiment_id = _find_xnat_subject_and_experiment_for_session_sic(
+            interface,
+            project_id,
+            session_sic,
+            verbose=verbose,
+        )
+        if experiment_id and xnat_subject:
+            available.append({
+                **entry,
+                "xnat_subject": xnat_subject,
+                "session_sic": session_sic,
+                "experiment_id": experiment_id,
+            })
         else:
-            missing.append({**entry, "subject_id": subject_id, "session_sic": session_sic})
+            missing.append({
+                **entry,
+                "xnat_subject": None,
+                "session_sic": session_sic,
+            })
 
     for entry in missing:
         print(
-            f"WARNING: XNAT experiment not found for subject {entry['subject_id']} session {entry['session_name']} "
+            f"WARNING: XNAT experiment not found for output subject {entry['output_subject']} session {entry['session_name']} "
             f"({entry['session_sic']})."
         )
 
@@ -274,27 +285,28 @@ def download_all(config, dry_run=False, rerun=False):
     completed = 0
     elapsed_total = 0.0
     for index, entry in enumerate(available, start=1):
-        subject_id = entry["subject_id"]
+        output_subject = entry["output_subject"]
+        xnat_subject = entry["xnat_subject"]
         session_name = entry["session_name"]
         session_sic = entry["session_sic"]
         experiment_id = entry["experiment_id"]
-        print(f"download {index}/{total}, {subject_id} {session_name}")
+        print(f"download {index}/{total}, {output_subject} {session_name}")
 
-        destination = output_root / subject_id / session_name
+        destination = output_root / output_subject / session_name
         if destination.exists() and rerun:
             shutil.rmtree(destination)
 
         start = time.perf_counter()
         try:
-            download_experiment(interface, project_id, subject_id, experiment_id, destination, verbose=verbose)
+            download_experiment(interface, project_id, xnat_subject, experiment_id, destination, verbose=verbose)
         except Exception as exc:
-            print(f"ERROR: Download failed for {subject_id} {session_name}: {exc}", file=sys.stderr)
+            print(f"ERROR: Download failed for {output_subject} {session_name}: {exc}", file=sys.stderr)
             return 1
         duration = time.perf_counter() - start
         elapsed_total += duration
         completed += 1
 
-        update_session_state(config, f"sub-{subject_id}", session_name, {"downloaded": True, "xnat_label": session_sic})
+        update_session_state(config, f"sub-{output_subject}", session_name, {"downloaded": True, "xnat_label": session_sic})
 
         remaining = total - completed
         if remaining:
