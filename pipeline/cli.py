@@ -7,6 +7,12 @@ from .pipeline import PipelineRunner
 from .state import load_subject_state, save_subject_state
 from .status import save_pipeline_status_figure
 from .utils import list_subjects, write_json, load_json
+from .steps.fmriprep import (
+    is_fmriprep_complete,
+    run_fmriprep_subject,
+    run_fmriprep_batch,
+    generate_slurm_scripts,
+)
 
 
 def _print_result(result):
@@ -57,6 +63,51 @@ def _run_subject_stage(stage_name, subject, config, dry_run=False, rerun=False):
     result = runner.run_stage(stage_name, subject, dry_run=dry_run, rerun=rerun)
     _print_result(result)
     return 0 if result.success else 1
+
+
+def _run_fmriprep_subject(subject, config, dry_run=False, rerun=False):
+    result = run_fmriprep_subject(subject, config, dry_run=dry_run, rerun=rerun)
+    if isinstance(result, dict):
+        if result.get("skipped"):
+            print(f"SKIPPED: {result.get('message')}")
+        else:
+            print(result.get("message", ""))
+            if result.get("command"):
+                print(f"\nCommand:\n  {result['command']}")
+        return 0 if result.get("success") else 1
+
+    print(result)
+    return 0
+
+
+def _run_fmriprep_batch(subjects, config, dry_run=False, rerun=False):
+    if not subjects:
+        print("No subjects found in BIDS directory.")
+        return 1
+
+    if config["fmriprep"].get("use_slurm"):
+        script_paths = generate_slurm_scripts(subjects, config)
+        print("Generated SLURM scripts:")
+        for script_path in script_paths:
+            print(f"  {script_path}")
+        return 0
+
+    exit_code = 0
+    for subject in subjects:
+        print(f"\n=== fmriprep {subject} ===")
+        result = run_fmriprep_subject(subject, config, dry_run=dry_run, rerun=rerun)
+        if isinstance(result, dict):
+            if result.get("skipped"):
+                print(f"SKIPPED: {result.get('message')}")
+            else:
+                print(result.get("message", ""))
+                if result.get("command"):
+                    print(f"\nCommand:\n  {result['command']}")
+            if not result.get("success"):
+                exit_code = 1
+        elif result is False:
+            exit_code = 1
+    return exit_code
 
 
 def _run_resume(subject, config, dry_run=False):
@@ -148,6 +199,19 @@ def main(argv=None):
                 help="Print a summary of XNAT, session_names.tsv, and downloaded data.",
             )
 
+    fmriprep_parser = subparsers.add_parser("fmriprep", help="Run fMRIPrep preprocessing for a subject or all subjects.")
+    fmriprep_parser.add_argument("subject", nargs="?", help="Participant label, e.g. sub-011.")
+    fmriprep_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Run fMRIPrep for all subjects found in the BIDS directory.",
+    )
+    fmriprep_parser.add_argument(
+        "--rerun",
+        action="store_true",
+        help="Re-run fMRIPrep and overwrite existing outputs regardless of previous completion.",
+    )
+
     status_parser = subparsers.add_parser("status", help="Generate a pipeline status figure across subjects and stages.")
     status_parser.add_argument(
         "--output",
@@ -220,6 +284,29 @@ def main(argv=None):
             print(f"No subject specified. Running {args.command} for next eligible subject: {subject}")
 
         return _run_subject_stage(args.command, subject, config, dry_run=args.dry_run, rerun=args.rerun)
+
+    if args.command == "fmriprep":
+        if args.subject and args.all:
+            parser.error("Cannot specify a subject and --all together.")
+
+        subjects = list_subjects(config)
+        if not subjects:
+            print("No subjects found in BIDS directory.")
+            return 1
+
+        if args.all:
+            return _run_fmriprep_batch(subjects, config, dry_run=args.dry_run, rerun=args.rerun)
+
+        subject = args.subject
+        if not subject:
+            incomplete = [sub for sub in subjects if not is_fmriprep_complete(sub, config)]
+            if not incomplete:
+                print("No incomplete subjects found for fMRIPrep.")
+                return 0
+            subject = incomplete[0]
+            print(f"No subject specified. Running fMRIPrep for next incomplete subject: {subject}")
+
+        return _run_fmriprep_subject(subject, config, dry_run=args.dry_run, rerun=args.rerun)
 
     if args.command == "run":
         if args.subject and args.all:
