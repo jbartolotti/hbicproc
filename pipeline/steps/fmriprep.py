@@ -363,52 +363,45 @@ def generate_slurm_scripts(subjects, config):
         lines.append(f"SUBJECT=$(sed -n '$((SLURM_ARRAY_TASK_ID + 1))p' {_quote(subject_list_file)})")
         lines.append("if [[ -z \"$SUBJECT\" ]]; then echo 'Subject not found'; exit 1; fi")
         lines.append(f"WORK={ _quote(script_dir) }")
-        lines.append("SCRATCH=/tmp")
-        lines.append("mkdir -p \"$SCRATCH\"")
-        lines.append("cd \"$SCRATCH\"")
-        lines.append("export APPTAINERENV_FS_LICENSE=/opt/fslicense/license.txt")
-        lines.append("export SINGULARITYENV_FS_LICENSE=/opt/fslicense/license.txt")
+        lines.append("")
         lines.append(f"BIDS_ROOT={_quote(bids_root)}")
         lines.append(f"FS_DIR={_quote(fs_dir)}")
-        lines.append(
-            "T1W=$(find \"$BIDS_ROOT/$SUBJECT/anat\" -maxdepth 1 -type f \( -name '*_T1w.nii' -o -name '*_T1w.nii.gz' \) | head -n 1)"
-        )
-        lines.append("if [[ -z \"$T1W\" ]]; then echo 'T1w not found for $SUBJECT'; exit 1; fi")
-
+        lines.append("")
+        
         if mode == "fastsurfer":
-            lines.append(
-                "singularity exec --cleanenv --nv \
-  " + _quote(fastsurfer_image) + " \
-  fastsurfer.sh \
-  --t1 \"$T1W\" \
-  --sid $SUBJECT \
-  --sd \"$FS_DIR\" \
-  --threads " + str(slurm.get('cpus_per_task', 8)) + " \
-  --bind $WORK/fslicense:/opt/fslicense,$SCRATCH:/tmp"
-            )
+            lines.append(f"""singularity exec --cleanenv --nv \\
+                -B $BIDS_ROOT:/data \\
+                -B $FS_DIR:/fs \\
+                -B {_quote(license_file)}:$HOME/license.txt \\
+                -B $SCRATCH:/tmp \\
+                {_quote(fastsurfer_image)} " \\
+                fastsurfer.sh \\
+                --fs_license $HOME/license.txt \\
+                --t1 /data/$SUBJECT/anat/$(SUBJECT)_T1w.nii.gz \\
+                --sid $SUBJECT \\
+                --sd /fs \\
+                --threads {str(slurm.get('cpus_per_task', 8))}
+            """)
         else:
             freesurfer_image = config["fmriprep"].get("freesurfer_image")
             if freesurfer_image:
-                lines.append(
-                    "singularity exec --cleanenv \
-  " + _quote(freesurfer_image) + " \
-  recon-all \
-  -s $SUBJECT \
-  -i \"$T1W\" \
-  -sd \"$FS_DIR\" \
-  -all \
-  --bind $WORK/fslicense:/opt/fslicense,$SCRATCH:/tmp"
-                )
-            else:
-                lines.append(
-                    "singularity exec --cleanenv \
-  recon-all \
-  -s $SUBJECT \
-  -i \"$T1W\" \
-  -sd \"$FS_DIR\" \
-  -all \
-  --bind $WORK/fslicense:/opt/fslicense,$SCRATCH:/tmp"
-                )
+                lines.append(f"""export SUBJECTS_DIR=/fs 
+                    export SINGULARITYENV_SUBJECTS_DIR=/fs 
+                    export APPTAINERENV_SUBJECTS_DIR=/fs
+                             
+                    singularity exec --cleanenv \\
+                    -B $BIDS_ROOT:/data \\
+                    -B {_quote(license_file)}:/opt/freesurfer/license.txt \\
+                    -B $SCRATCH:/tmp \\
+                    {_quote(freesurfer_image)} " \\
+                    recon-all \\
+                    -s $SUBJECT \\
+                    -fs_license $HOME/license.txt \\
+                    -i /data/$SUBJECT/anat/$SUBJECT_T1w.nii.gz \\
+                    -sd /fs \\
+                    -all
+                """)
+                
         pre_job.write_text("\n".join(lines) + "\n")
         scripts.append(str(pre_job))
 
@@ -440,6 +433,7 @@ def generate_slurm_scripts(subjects, config):
         "singularity",
         "exec",
         "--cleanenv",
+        "--bind $WORK/fslicense:/opt/fslicense,$SCRATCH:/tmp",
         _quote(fmriprep_image),
         "fmriprep",
         '"$BIDS_ROOT"',
@@ -455,15 +449,12 @@ def generate_slurm_scripts(subjects, config):
         mode_args.append("--fs-no-reconall")
     elif mode in ("reuse", "freesurfer", "fastsurfer"):
         mode_args.extend(["--fs-subjects-dir", '"$FS_DIR"', "--fs-no-reconall", "--fs-no-resume"])
-    elif mode == "integrated" and license_file:
-        mode_args.extend(["--fs-license-file", '"$LICENSE_FILE"'])
 
     if _find_multi_echo(subjects[0], config):
         mode_args.append("--me-output-echoes")
 
     command.extend(mode_args)
     lines.append(" ".join(command))
-    lines.append("  --bind $WORK/fslicense:/opt/fslicense,$SCRATCH:/tmp")
     fmriprep_job.write_text("\n".join(lines) + "\n")
     scripts.append(str(fmriprep_job))
 
