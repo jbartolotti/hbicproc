@@ -284,6 +284,16 @@ def run_fmriprep_subject(subject, config, dry_run=False, rerun=False):
     return run_fmriprep(subject, config, dry_run=dry_run, rerun=rerun)
 
 
+def run_fmriprep_batch(subjects, config, dry_run=False, rerun=False):
+    if config["fmriprep"].get("use_slurm"):
+        return generate_slurm_scripts(subjects, config)
+
+    results = []
+    for subject in subjects:
+        results.append(run_fmriprep_subject(subject, config, dry_run=dry_run, rerun=rerun))
+    return results
+
+
 def run(subject, config, dry_run=False):
     return run_fmriprep_subject(subject, config, dry_run=dry_run)
 
