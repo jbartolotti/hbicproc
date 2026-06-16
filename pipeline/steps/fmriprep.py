@@ -298,19 +298,30 @@ def run(subject, config, dry_run=False):
     return run_fmriprep_subject(subject, config, dry_run=dry_run)
 
 
-def _slurm_header(name, slurm, array_length, output_path):
+def _slurm_header(name, slurm, array_length, output_path, email=None):
     lines = [
         "#!/usr/bin/env bash",
         f"#SBATCH --job-name={name}",
         f"#SBATCH --partition={slurm.get('partition', 'sixhour')}",
+        f"#SBATCH --ntasks=1",
         f"#SBATCH --cpus-per-task={slurm.get('cpus_per_task', 8)}",
-        f"#SBATCH --mem={slurm.get('mem', '32G')}",
+        f"#SBATCH --mem={slurm.get('mem', '24G')}",
         f"#SBATCH --time={slurm.get('time_fmriprep', '06:00:00') if name == 'slurm_fmriprep' else slurm.get('time_fastsurfer', '02:00:00')}",
         f"#SBATCH --array=0-{max(array_length - 1, 0)}",
         f"#SBATCH --output={output_path}",
-        "set -euo pipefail",
-        "",
     ]
+    if email:
+        lines.extend([
+            "#SBATCH --mail-type=BEGIN,END,FAIL",
+            f"#SBATCH --mail-user={email}",
+        ])
+    lines.extend([
+        "set -euo pipefail",
+        "pwd; hostname; date",
+        "",
+        "module load StdEnv singularity",
+        "",
+    ])
     return "\n".join(lines)
 
 
@@ -319,10 +330,10 @@ def _quote(path):
 
 
 def generate_slurm_scripts(subjects, config):
-    work_dir = Path(config["fmriprep"]["work_dir"])
-    ensure_dir(work_dir)
+    script_dir = Path(config.get("code_dir", "."))
+    ensure_dir(script_dir)
 
-    subject_list_file = work_dir / "slurm_fmriprep_subjects.txt"
+    subject_list_file = script_dir / "slurm_fmriprep_subjects.txt"
     subject_list_file.write_text("\n".join(subjects) + "\n")
 
     slurm = config["fmriprep"].get("slurm", {})
@@ -338,16 +349,27 @@ def generate_slurm_scripts(subjects, config):
 
     array_size = len(subjects)
     pre_job = None
-
     if mode in ("fastsurfer", "freesurfer"):
-        pre_job = work_dir / "slurm_fmriprep_precompute.sh"
-        pre_output = work_dir / "slurm_fmriprep_precompute_%A_%a.out"
-        header = _slurm_header("slurm_fmriprep_precompute", slurm, array_size, _quote(pre_output))
+        pre_job = script_dir / "slurm_fmriprep_precompute.sh"
+        pre_output = script_dir / "slurm_fmriprep_precompute_%A_%a.out"
+        header = _slurm_header(
+            "slurm_fmriprep_precompute",
+            slurm,
+            array_size,
+            _quote(pre_output),
+            config.get("email", ""),
+        )
         lines = [header]
-        lines.append(f"SUBJECT=$(sed -n '$((SLURM_ARRAY_TASK_ID + 1))p' { _quote(subject_list_file) })")
+        lines.append(f"SUBJECT=$(sed -n '$((SLURM_ARRAY_TASK_ID + 1))p' {_quote(subject_list_file)})")
         lines.append("if [[ -z \"$SUBJECT\" ]]; then echo 'Subject not found'; exit 1; fi")
-        lines.append(f"BIDS_ROOT={ _quote(bids_root) }")
-        lines.append(f"FS_DIR={ _quote(fs_dir) }")
+        lines.append(f"WORK={ _quote(script_dir) }")
+        lines.append("SCRATCH=/tmp")
+        lines.append("mkdir -p \"$SCRATCH\"")
+        lines.append("cd \"$SCRATCH\"")
+        lines.append("export APPTAINERENV_FS_LICENSE=/opt/fslicense/license.txt")
+        lines.append("export SINGULARITYENV_FS_LICENSE=/opt/fslicense/license.txt")
+        lines.append(f"BIDS_ROOT={_quote(bids_root)}")
+        lines.append(f"FS_DIR={_quote(fs_dir)}")
         lines.append(
             "T1W=$(find \"$BIDS_ROOT/$SUBJECT/anat\" -maxdepth 1 -type f \( -name '*_T1w.nii' -o -name '*_T1w.nii.gz' \) | head -n 1)"
         )
@@ -355,33 +377,64 @@ def generate_slurm_scripts(subjects, config):
 
         if mode == "fastsurfer":
             lines.append(
-                f"singularity exec --nv {_quote(fastsurfer_image)} fastsurfer.sh --t1 \"$T1W\" --sid $SUBJECT --sd \"$FS_DIR\" --threads {slurm.get('cpus_per_task', 8)}"
+                "singularity exec --cleanenv --nv \
+  " + _quote(fastsurfer_image) + " \
+  fastsurfer.sh \
+  --t1 \"$T1W\" \
+  --sid $SUBJECT \
+  --sd \"$FS_DIR\" \
+  --threads " + str(slurm.get('cpus_per_task', 8)) + " \
+  --bind $WORK/fslicense:/opt/fslicense,$SCRATCH:/tmp"
             )
         else:
             freesurfer_image = config["fmriprep"].get("freesurfer_image")
             if freesurfer_image:
                 lines.append(
-                    f"singularity exec {_quote(freesurfer_image)} recon-all -s $SUBJECT -i \"$T1W\" -sd \"$FS_DIR\" -all"
+                    "singularity exec --cleanenv \
+  " + _quote(freesurfer_image) + " \
+  recon-all \
+  -s $SUBJECT \
+  -i \"$T1W\" \
+  -sd \"$FS_DIR\" \
+  -all \
+  --bind $WORK/fslicense:/opt/fslicense,$SCRATCH:/tmp"
                 )
             else:
                 lines.append(
-                    "recon-all -s $SUBJECT -i \"$T1W\" -sd \"$FS_DIR\" -all"
+                    "singularity exec --cleanenv \
+  recon-all \
+  -s $SUBJECT \
+  -i \"$T1W\" \
+  -sd \"$FS_DIR\" \
+  -all \
+  --bind $WORK/fslicense:/opt/fslicense,$SCRATCH:/tmp"
                 )
-
         pre_job.write_text("\n".join(lines) + "\n")
         scripts.append(str(pre_job))
 
-    fmriprep_job = work_dir / "slurm_fmriprep.sh"
-    fmriprep_output = work_dir / "slurm_fmriprep_%A_%a.out"
-    header = _slurm_header("slurm_fmriprep", slurm, array_size, _quote(fmriprep_output))
+    fmriprep_job = script_dir / "slurm_fmriprep.sh"
+    fmriprep_output = script_dir / "slurm_fmriprep_%A_%a.out"
+    header = _slurm_header(
+        "slurm_fmriprep",
+        slurm,
+        array_size,
+        _quote(fmriprep_output),
+        config.get("email", ""),
+    )
     lines = [header]
-    lines.append(f"SUBJECT=$(sed -n '$((SLURM_ARRAY_TASK_ID + 1))p' { _quote(subject_list_file) })")
+    lines.append(f"SUBJECT=$(sed -n '$((SLURM_ARRAY_TASK_ID + 1))p' {_quote(subject_list_file)})")
     lines.append("if [[ -z \"$SUBJECT\" ]]; then echo 'Subject not found'; exit 1; fi")
-    lines.append(f"BIDS_ROOT={ _quote(bids_root) }")
-    lines.append(f"OUTPUT_DIR={ _quote(Path(config['fmriprep']['output_dir'])) }/$SUBJECT")
-    lines.append(f"WORK_DIR={ _quote(Path(config['fmriprep']['work_dir'])) }/$SUBJECT")
-    lines.append(f"FS_DIR={ _quote(fs_dir) }")
-    lines.append(f"LICENSE_FILE={ _quote(license_file) }")
+    lines.append(f"WORK={ _quote(script_dir) }")
+    lines.append("SCRATCH=/tmp")
+    lines.append("mkdir -p \"$SCRATCH\"")
+    lines.append("cd \"$SCRATCH\"")
+    lines.append("export APPTAINERENV_FS_LICENSE=/opt/fslicense/license.txt")
+    lines.append("export SINGULARITYENV_FS_LICENSE=/opt/fslicense/license.txt")
+    lines.append(f"BIDS_ROOT={_quote(bids_root)}")
+    lines.append(f"OUTPUT_DIR={_quote(Path(config['fmriprep']['output_dir']))}/$SUBJECT")
+    lines.append(f"WORK_DIR={_quote(Path(config['fmriprep']['work_dir']))}/$SUBJECT")
+    lines.append(f"FS_DIR={_quote(fs_dir)}")
+    lines.append(f"LICENSE_FILE={_quote(license_file)}")
 
     command = [
         "singularity",
@@ -410,6 +463,7 @@ def generate_slurm_scripts(subjects, config):
 
     command.extend(mode_args)
     lines.append(" ".join(command))
+    lines.append("  --bind $WORK/fslicense:/opt/fslicense,$SCRATCH:/tmp")
     fmriprep_job.write_text("\n".join(lines) + "\n")
     scripts.append(str(fmriprep_job))
 

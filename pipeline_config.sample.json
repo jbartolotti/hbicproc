@@ -1,5 +1,7 @@
 {
   "study_root": ".",
+  "code_dir": "code",
+  "email": "",
   "log_dir": "logs",
   "tokens": {
     "anat": ["mprage", "t1", "t2", "anat", "mpr", "sag", "t1w", "t2w"],

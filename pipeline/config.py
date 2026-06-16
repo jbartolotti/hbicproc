@@ -38,6 +38,8 @@ def load_default_config(root_dir="."):
 def _apply_defaults(config):
     defaults = {
         "study_root": ".",
+        "code_dir": "code",
+        "email": "",
         "log_dir": "",
         "tokens": {
             "anat": ["mprage", "t1", "t2", "anat", "mpr", "sag", "t1w", "t2w"],
@@ -115,6 +117,10 @@ def _resolve_paths(config, root_dir):
     if not config.get("log_dir"):
         config["log_dir"] = str(Path(study_root) / "logs")
     config["log_dir"] = str(_resolve_path(config["log_dir"], root_dir, study_root))
+
+    if not config.get("code_dir"):
+        config["code_dir"] = str(Path(study_root) / "code")
+    config["code_dir"] = str(_resolve_path(config["code_dir"], root_dir, study_root))
 
     if config.get("bids_root"):
         config["bids_root"] = str(_resolve_path(config["bids_root"], root_dir, study_root))
