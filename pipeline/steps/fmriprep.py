@@ -284,6 +284,10 @@ def run_fmriprep_subject(subject, config, dry_run=False, rerun=False):
     return run_fmriprep(subject, config, dry_run=dry_run, rerun=rerun)
 
 
+def run(subject, config, dry_run=False):
+    return run_fmriprep_subject(subject, config, dry_run=dry_run)
+
+
 def _slurm_header(name, slurm, array_length, output_path):
     lines = [
         "#!/usr/bin/env bash",

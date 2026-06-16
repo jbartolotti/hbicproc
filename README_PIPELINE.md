@@ -14,6 +14,7 @@ hbicproc validate sub-001
 hbicproc qc sub-001
 hbicproc exclude sub-001 --run task-nback_run-2
 hbicproc preprocess sub-001
+hbicproc fmriprep sub-001
 hbicproc run sub-001
 hbicproc status
 ```
@@ -23,6 +24,7 @@ Batch commands:
 ```bash
 hbicproc qc --all
 hbicproc preprocess --all
+hbicproc fmriprep --all
 hbicproc run --all
 ```
 
@@ -42,6 +44,26 @@ Stage commands also support `--rerun` to force execution even when a stage is ma
 Edit `pipeline_config.json` to set your study root, BIDS paths, Singularity images, and exclusions file.
 
 A sample configuration is available at `pipeline_config.sample.json`.
+
+### fMRIPrep configuration
+
+The `fmriprep` section controls preprocessing and optional FreeSurfer / FastSurfer integration.
+
+- `fmriprep.singularity_image`: Singularity image reference for fMRIPrep.
+- `fmriprep.fmriprep_image`: explicit Singularity image for fMRIPrep (falls back to `singularity_image`).
+- `fmriprep.fastsurfer_image`: Singularity image reference for FastSurfer when using `freesurfer_mode: fastsurfer`.
+- `fmriprep.freesurfer_image`: Singularity image reference for standalone FreeSurfer recon-all when using `freesurfer_mode: freesurfer`.
+- `fmriprep.output_dir`: derivative output directory for fMRIPrep results.
+- `fmriprep.work_dir`: temporary working directory for fMRIPrep and SLURM scripts.
+- `fmriprep.freesurfer_subjects_dir`: directory for precomputed FreeSurfer / FastSurfer outputs.
+- `fmriprep.fs_license_file`: path to the FreeSurfer license file.
+- `fmriprep.extra_args`: extra fMRIPrep command-line arguments, formatted with `{subject}`.
+- `fmriprep.use_slurm`: set to `true` to generate SLURM submission scripts instead of running locally.
+- `fmriprep.freesurfer_mode`: one of `integrated`, `none`, `reuse`, `freesurfer`, or `fastsurfer`.
+- `fmriprep.slurm`: SBATCH defaults used when `use_slurm` is enabled.
+
+When `freesurfer_mode` is `fastsurfer`, FastSurfer is run first and then fMRIPrep uses the precomputed `freesurfer_subjects_dir`.
+When `freesurfer_mode` is `freesurfer`, `recon-all` is run first and then fMRIPrep reuses the generated subjects directory.
 
 ### XNAT download configuration
 
