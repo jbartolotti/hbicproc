@@ -23,8 +23,9 @@ class QcStage(BaseStage):
 
         output_dir = Path(config["mriqc"]["output_dir"])
         subject_output_dir = output_dir / subject
-        work_dir = Path(config["mriqc"]["work_dir"])
-
+        base_work_dir = Path(config["mriqc"]["work_dir"])
+        work_dir = base_work_dir / f"work_{subject}"
+        
         if rerun and subject_output_dir.exists() and not dry_run:
             shutil.rmtree(subject_output_dir)
 
