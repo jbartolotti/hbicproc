@@ -25,7 +25,7 @@ class QcStage(BaseStage):
         subject_output_dir = output_dir / subject
         base_work_dir = Path(config["mriqc"]["work_dir"])
         work_dir = base_work_dir / f"work_{subject}"
-        
+
         if rerun and subject_output_dir.exists() and not dry_run:
             shutil.rmtree(subject_output_dir)
 
@@ -33,7 +33,7 @@ class QcStage(BaseStage):
         ensure_dir(work_dir)
 
         internal_input_dir = Path("/bids_root")
-        internal_work_dir = Path("/tmp/work")
+        internal_work_dir = Path("/work")
 
         binds = [
             (str(bids_root.resolve()), str(internal_input_dir)),
