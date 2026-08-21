@@ -2,9 +2,12 @@ import argparse
 import sys
 from pathlib import Path
 
+from hbicproc.behavior.workflow import run_behavior_events
+
 from .config import load_config, save_default_config
 from .pipeline import PipelineRunner
 from .state import load_subject_state, save_subject_state
+from .logger import append_event
 from .status import save_pipeline_status_figure
 from .utils import list_subjects, write_json, load_json
 from .steps.fmriprep import (
@@ -131,6 +134,29 @@ def _run_resume_all(config, dry_run=False):
     return exit_code
 
 
+def _run_behavior_events(subject, config, task, dry_run=False):
+    try:
+        result = run_behavior_events(subject, config, task_name=task, dry_run=dry_run)
+    except Exception as exc:
+        result = {
+            "success": False,
+            "skipped": False,
+            "message": str(exc),
+            "command": "",
+            "returncode": None,
+        }
+
+    if result.get("skipped"):
+        print(f"SKIPPED: {result.get('message')}")
+    else:
+        print(result.get("message", ""))
+        if result.get("command"):
+            print(f"\nCommand:\n  {result['command']}")
+
+    append_event(result.get("message", ""), config, subject=subject, step="behavior")
+    return 0 if result.get("success") else 1
+
+
 def _subject_exclusion(subject, config, runs, clear):
     exclusions_file = Path(config["hbicproc"]["exclusions_file"])
     exclusions = load_json(exclusions_file, default={})
@@ -227,6 +253,10 @@ def main(argv=None):
         help="Run the pipeline for all subjects found in the BIDS output directory.",
     )
 
+    events_parser = subparsers.add_parser("events", help="Generate BIDS events.tsv files from E-Prime .edat3 files.")
+    events_parser.add_argument("subject", help="Participant label, e.g. sub-001.")
+    events_parser.add_argument("--task", default="stroop", help="Behavioral task name to parse.")
+
     exclude_parser = subparsers.add_parser("exclude", help="Record MRIQC exclusions for a subject.")
     exclude_parser.add_argument("subject", help="Participant label, e.g. sub-011.")
     exclude_parser.add_argument(
@@ -254,6 +284,9 @@ def main(argv=None):
         figure_path = save_pipeline_status_figure(config, output_path=output_path)
         print(f"Pipeline status figure saved to: {figure_path}")
         return 0
+
+    if args.command == "events":
+        return _run_behavior_events(args.subject, config, args.task, dry_run=args.dry_run)
 
     if args.command in ["download", "bidsify", "validate", "qc", "preprocess"]:
         if args.command == "download" and args.summary and args.all:

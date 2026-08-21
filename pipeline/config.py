@@ -90,13 +90,20 @@ def _apply_defaults(config):
         },
         "hbicproc": {
             "exclusions_file": "derivatives/hbicproc/exclusions.json"
+        },
+        "behavior": {
+            "task_configs_dir": "code/behavior",
+            "parser_plugins_dir": "code/behavior/plugins",
+            "edat3_search_root": "sourcedata",
+            "output_dir": "derivatives/behavior/events",
+            "reader_backend": "auto"
         }
     }
 
     merged = defaults.copy()
     merged.update(config)
 
-    for key in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc"]:
+    for key in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc", "behavior"]:
         merged[key] = {**defaults.get(key, {}), **config.get(key, {})}
 
     user_tokens = config.get("tokens", {})
@@ -125,7 +132,7 @@ def _resolve_paths(config, root_dir):
     if config.get("bids_root"):
         config["bids_root"] = str(_resolve_path(config["bids_root"], root_dir, study_root))
 
-    for section in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc"]:
+    for section in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc", "behavior"]:
         section_data = config.get(section, {})
         for key, value in section_data.items():
             if key.endswith("_dir") or key.endswith("_path") or key.endswith("_file"):
