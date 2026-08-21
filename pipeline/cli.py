@@ -204,7 +204,7 @@ def main(argv=None):
     init_parser = subparsers.add_parser("init", help="Create a default pipeline config file.")
     init_parser.add_argument("path", help="Path to write a new config file.")
 
-    for stage_name in ["download", "bidsify", "validate", "qc", "preprocess"]:
+    for stage_name in ["download", "bidsify", "validate", "qc", "preprocess", "events"]:
         stage_parser = subparsers.add_parser(stage_name, help=f"Run the {stage_name} stage for a subject.")
         stage_parser.add_argument("subject", nargs="?", help="Participant label, e.g. sub-011.")
         stage_parser.add_argument(
@@ -223,6 +223,8 @@ def main(argv=None):
                 action="store_true",
                 help="Print a summary of XNAT, session_names.tsv, and downloaded data.",
             )
+        elif stage_name == "events":
+            stage_parser.add_argument("--task", default="stroop", help="Behavioral task name to parse.")
 
     fmriprep_parser = subparsers.add_parser("fmriprep", help="Run fMRIPrep preprocessing for a subject or all subjects.")
     fmriprep_parser.add_argument("subject", nargs="?", help="Participant label, e.g. sub-011.")
@@ -251,10 +253,6 @@ def main(argv=None):
         action="store_true",
         help="Run the pipeline for all subjects found in the BIDS output directory.",
     )
-
-    events_parser = subparsers.add_parser("events", help="Generate BIDS events.tsv files from E-Prime .edat3 files.")
-    events_parser.add_argument("subject", help="Participant label, e.g. sub-001.")
-    events_parser.add_argument("--task", default="stroop", help="Behavioral task name to parse.")
 
     exclude_parser = subparsers.add_parser("exclude", help="Record MRIQC exclusions for a subject.")
     exclude_parser.add_argument("subject", help="Participant label, e.g. sub-011.")

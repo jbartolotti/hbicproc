@@ -125,6 +125,30 @@ sourcedata/sub-001/ses-T2
 
 The QC stage runs participant-level MRIQC and prints the exact next command for human review.
 
+## Behavioral events configuration
+
+The `events` stage uses the `behavior` section of `pipeline_config.json` to locate E-Prime files, select task parsers, and write BIDS-style events outputs.
+
+- `behavior.task_configs_dir`: directory containing JSON task configuration files for each supported task. The default example is `code/behavior`.
+- `behavior.parser_plugins_dir`: optional directory containing additional parser plugin modules for custom tasks. Files are loaded automatically when present.
+- `behavior.edat3_search_root`: root directory used to search for source `.edat3` files. The default is `sourcedata`.
+- `behavior.output_dir`: directory where generated `task-*_events.tsv` and `task-*_events.json` files will be written.
+- `behavior.reader_backend`: backend selector for the E-Prime reader. Use `auto` for automatic detection, or set it to a specific module name such as `edat` or `pandas`.
+
+Example:
+
+```json
+"behavior": {
+  "task_configs_dir": "code/behavior",
+  "parser_plugins_dir": "code/behavior/plugins",
+  "edat3_search_root": "sourcedata",
+  "output_dir": "derivatives/behavior/events",
+  "reader_backend": "auto"
+}
+```
+
+The `events` stage expects task configuration JSON files in the configured task config directory. A worked example is included at `code/behavior/stroop.json`.
+
 ## Status reporting
 
 `hbicproc status` scans all recorded subject state files and writes a stage-completion grid to an SVG file in the BIDS code directory by default.
