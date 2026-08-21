@@ -2,9 +2,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from hbicproc.behavior.workflow import run_behavior_events
-
 from .config import load_config, save_default_config
+from .steps.behavior import run_behavior_step
 from .pipeline import PipelineRunner
 from .state import load_subject_state, save_subject_state
 from .logger import append_event
@@ -136,7 +135,7 @@ def _run_resume_all(config, dry_run=False):
 
 def _run_behavior_events(subject, config, task, dry_run=False):
     try:
-        result = run_behavior_events(subject, config, task_name=task, dry_run=dry_run)
+        result = run_behavior_step(subject, config, task_name=task, dry_run=dry_run)
     except Exception as exc:
         result = {
             "success": False,

@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from hbicproc.behavior.config import TaskConfig
-from hbicproc.behavior.models import EventTable
-from hbicproc.behavior.parsers.registry import ParserRegistry
-from hbicproc.behavior.parsers.stroop import StroopParser
-from hbicproc.behavior.validator import validate_event_table
-from hbicproc.behavior.writer import EventsWriter
+from pipeline.behavior.config import TaskConfig
+from pipeline.behavior.models import EventTable
+from pipeline.behavior.parsers.registry import ParserRegistry
+from pipeline.behavior.parsers.stroop import StroopParser
+from pipeline.behavior.validator import validate_event_table
+from pipeline.behavior.writer import EventsWriter
 
 
 def test_task_config_loads_json(tmp_path: Path) -> None:

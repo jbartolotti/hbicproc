@@ -20,8 +20,7 @@ class EventsWriter:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        normalized = events_df.copy()
-        normalized = normalized.reset_index(drop=True)
+        normalized = events_df.copy().reset_index(drop=True)
         normalized.to_csv(output_path, sep="\t", index=False, encoding="utf-8")
 
         sidecar_output: Path | None = None

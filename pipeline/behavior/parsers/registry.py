@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-from types import ModuleType
 from typing import Type
 
 from .base import TaskParser

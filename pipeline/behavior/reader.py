@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 
@@ -45,8 +44,7 @@ class EPrimeReader:
         if backend == "pandas":
             return self._read_text_export(path)
 
-        module_name = backend
-        module = importlib.import_module(module_name)
+        module = importlib.import_module(backend)
         for attribute_name in ("read", "read_edat", "read_file", "load"):
             attribute = getattr(module, attribute_name, None)
             if callable(attribute):
@@ -57,14 +55,6 @@ class EPrimeReader:
                     candidate = result[0]
                     if isinstance(candidate, pd.DataFrame):
                         return candidate
-        for attribute_name in ("EDAT", "EPrimeReader"):
-            attribute = getattr(module, attribute_name, None)
-            if callable(attribute):
-                instance = attribute(path)
-                if hasattr(instance, "read"):
-                    result = instance.read()
-                    if isinstance(result, pd.DataFrame):
-                        return result
         return None
 
     def _read_text_export(self, path: Path) -> pd.DataFrame:
