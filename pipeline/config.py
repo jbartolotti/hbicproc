@@ -96,7 +96,8 @@ def _apply_defaults(config):
             "parser_plugins_dir": "code/behavior/plugins",
             "edat3_search_root": "sourcedata",
             "output_dir": "derivatives/behavior/events",
-            "reader_backend": "auto"
+            "reader_backend": "auto",
+            "verbose": False
         }
     }
 
