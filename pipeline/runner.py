@@ -1,9 +1,7 @@
-from pathlib import Path
-
 from .state import load_subject_state, save_subject_state
 from .stages import STAGE_CLASSES
 from .stages.base import StageResult
-from .core.paths import list_subjects, subject_dir
+from .core.paths import list_subjects
 
 
 class PipelineRunner:
@@ -20,14 +18,11 @@ class PipelineRunner:
         self.config = config
         self.stages = {name: cls() for name, cls in STAGE_CLASSES.items()}
 
-    def subject_path(self, subject):
-        return subject_dir(self.config, subject)
-
     def load_state(self, subject):
-        return load_subject_state(self.subject_path(subject), config=self.config)
+        return load_subject_state(self.config, subject)
 
     def save_state(self, subject, state):
-        save_subject_state(self.subject_path(subject), state, config=self.config)
+        save_subject_state(self.config, subject, state)
 
     def get_next_stage(self, state):
         for stage_name in self.stage_order:
@@ -50,17 +45,9 @@ class PipelineRunner:
 
         return result
 
-    def run_resume(self, subject, dry_run=False):
-        state = self.load_state(subject)
+    def run_resume(self, subject, dry_run=False, rerun=False):
         for stage_name in self.stage_order:
-            stage = self.stages[stage_name]
-            if stage.state_key and state.get(stage.state_key):
-                continue
-
-            result = stage.execute(subject, self.config, state, dry_run=dry_run)
-            if result.success and not result.skipped and stage.state_key and not stage.human_step:
-                self.save_state(subject, state)
-
+            result = self.run_stage(stage_name, subject, dry_run=dry_run, rerun=rerun)
             if not result.success:
                 return result
 

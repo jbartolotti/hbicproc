@@ -4,7 +4,7 @@ from pathlib import Path
 
 from .config import load_config, save_default_config
 from .steps.behavior import run_behavior_step
-from .pipeline import PipelineRunner
+from .runner import PipelineRunner
 from .state import load_subject_state, save_subject_state
 from .logger import append_event
 from .status import save_pipeline_status_figure
@@ -176,9 +176,9 @@ def _subject_exclusion(subject, config, runs, clear):
     if save_exclusions:
         exclusions_file.parent.mkdir(parents=True, exist_ok=True)
         write_json(exclusions_file, exclusions)
-        state = load_subject_state(Path(config["study_root"]) / subject, config=config)
+        state = load_subject_state(config, subject)
         state["qc_reviewed"] = True
-        save_subject_state(Path(config["study_root"]) / subject, state, config=config)
+        save_subject_state(config, subject, state)
 
     print(f"Recorded exclusions for {subject} in {exclusions_file}")
     print("QC review is now complete for this subject.")

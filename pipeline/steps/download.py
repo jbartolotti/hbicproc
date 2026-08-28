@@ -318,9 +318,9 @@ def _update_subject_downloaded_states(config, session_map, output_root: Path):
         actual = {session for (subject, session) in downloaded_sessions if subject == subject_id}
         if expected and expected.issubset(actual):
             subject_label = f"sub-{subject_id}"
-            state = load_subject_state(Path(config["study_root"]) / subject_label, config=config)
+            state = load_subject_state(config, subject_label)
             state["downloaded"] = True
-            save_subject_state(Path(config["study_root"]) / subject_label, state, config=config)
+            save_subject_state(config, subject_label, state)
     return
 
 

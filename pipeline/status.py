@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from .pipeline import PipelineRunner
+from .runner import PipelineRunner
 from .state import load_subject_state
 from .core.paths import get_bids_root
 
@@ -24,7 +24,7 @@ def _find_subject_rows(config):
 def _state_matrix(config, rows, stage_names):
     matrix = []
     for subject, session in rows:
-        state = load_subject_state(Path(config["study_root"]) / subject, config=config)
+        state = load_subject_state(config, subject)
         row = [bool(state.get(stage)) for stage in stage_names]
         matrix.append(row)
     return matrix
