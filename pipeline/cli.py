@@ -290,12 +290,12 @@ def main(argv=None):
             parser.error("Cannot specify --summary and --all together.")
 
         if args.command == "download" and args.all:
-            from .steps.download import download_all
+            from .processing.download.service import download_all
 
             return download_all(config, dry_run=args.dry_run, rerun=args.rerun)
 
         if args.command == "download" and args.summary:
-            from .steps.download import summarize_downloads
+            from .processing.download.service import summarize_downloads
 
             return summarize_downloads(config)
 

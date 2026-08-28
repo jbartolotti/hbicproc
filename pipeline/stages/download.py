@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from .base import BaseStage, StageResult
-from ..steps.download import run as download_run
+from ..processing.download.service import run as download_run
 
 
 class DownloadStage(BaseStage):
