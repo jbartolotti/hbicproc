@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .config import load_config, save_default_config
 from .runner import PipelineRunner
+from .stages import STAGE_CLASSES
 from .state import load_subject_state, save_subject_state
 from .logger import append_event
 from .status import save_pipeline_status_figure
@@ -111,7 +112,65 @@ def _subject_exclusion(subject, config, runs, clear):
     return 0
 
 
-def main(argv=None):
+def _handle_stage(parser, args, config):
+    stage_name = args.command
+
+    if stage_name == "download" and args.summary and args.all:
+        parser.error("Cannot specify --summary and --all together.")
+
+    if stage_name == "download" and args.all:
+        from .processing.download.service import download_all
+
+        return download_all(config, dry_run=args.dry_run, rerun=args.rerun)
+
+    if stage_name == "download" and args.summary:
+        from .processing.download.service import summarize_downloads
+
+        return summarize_downloads(config)
+
+    if stage_name == "behavior" and args.task:
+        config.setdefault("behavior", {})["tasks"] = [args.task]
+
+    if args.all:
+        if args.subject:
+            parser.error("Cannot specify a subject and --all together.")
+        return _run_for_all(stage_name, config, dry_run=args.dry_run, rerun=args.rerun)
+
+    subject = args.subject
+    if not subject:
+        if stage_name not in PipelineRunner.stage_order:
+            parser.error(f"The {stage_name} stage requires an explicit subject (or --all).")
+        runner = PipelineRunner(config)
+        subject = runner.get_subject_for_stage(stage_name, rerun=args.rerun)
+        if not subject:
+            print(f"No eligible subject found for stage '{stage_name}'.")
+            return 1
+        print(f"No subject specified. Running {stage_name} for next eligible subject: {subject}")
+
+    return _run_subject_stage(stage_name, subject, config, dry_run=args.dry_run, rerun=args.rerun)
+
+
+def _handle_status(args, config):
+    figure_path = save_pipeline_status_figure(config, output_path=args.output)
+    print(f"Pipeline status figure saved to: {figure_path}")
+    return 0
+
+
+def _handle_run(parser, args, config):
+    if args.subject and args.all:
+        parser.error("Cannot specify a subject and --all together.")
+    if args.subject:
+        return _run_resume(args.subject, config, dry_run=args.dry_run)
+    return _run_resume_all(config, dry_run=args.dry_run)
+
+
+def _handle_exclude(parser, args, config):
+    if not args.runs and not args.clear:
+        parser.error("You must provide --run or --clear.")
+    return _subject_exclusion(args.subject, config, args.runs or [], args.clear)
+
+
+def _build_parser():
     parser = argparse.ArgumentParser(description="hbicproc stage-based pipeline CLI")
     parser.add_argument(
         "--config",
@@ -129,7 +188,7 @@ def main(argv=None):
     init_parser = subparsers.add_parser("init", help="Create a default pipeline config file.")
     init_parser.add_argument("path", help="Path to write a new config file.")
 
-    for stage_name in ["download", "bidsify", "validate", "qc", "preprocess", "behavior"]:
+    for stage_name in STAGE_CLASSES:
         stage_parser = subparsers.add_parser(stage_name, help=f"Run the {stage_name} stage for a subject.")
         stage_parser.add_argument("subject", nargs="?", help="Participant label, e.g. sub-011.")
         stage_parser.add_argument(
@@ -180,6 +239,11 @@ def main(argv=None):
         help="Clear recorded exclusions for the subject.",
     )
 
+    return parser
+
+
+def main(argv=None):
+    parser = _build_parser()
     args = parser.parse_args(argv)
 
     if args.command == "init":
@@ -188,58 +252,17 @@ def main(argv=None):
 
     config = _load_config(args.config)
 
+    if args.command in STAGE_CLASSES:
+        return _handle_stage(parser, args, config)
+
     if args.command == "status":
-        output_path = args.output
-        figure_path = save_pipeline_status_figure(config, output_path=output_path)
-        print(f"Pipeline status figure saved to: {figure_path}")
-        return 0
-
-    if args.command in ["download", "bidsify", "validate", "qc", "preprocess", "behavior"]:
-        if args.command == "download" and args.summary and args.all:
-            parser.error("Cannot specify --summary and --all together.")
-
-        if args.command == "download" and args.all:
-            from .processing.download.service import download_all
-
-            return download_all(config, dry_run=args.dry_run, rerun=args.rerun)
-
-        if args.command == "download" and args.summary:
-            from .processing.download.service import summarize_downloads
-
-            return summarize_downloads(config)
-
-        if args.command == "behavior" and args.task:
-            config.setdefault("behavior", {})["tasks"] = [args.task]
-
-        if args.all:
-            if args.subject:
-                parser.error("Cannot specify a subject and --all together.")
-            return _run_for_all(args.command, config, dry_run=args.dry_run, rerun=args.rerun)
-
-        subject = args.subject
-        if not subject:
-            if args.command == "behavior":
-                parser.error("The behavior stage requires an explicit subject (or --all).")
-            runner = PipelineRunner(config)
-            subject = runner.get_subject_for_stage(args.command, rerun=args.rerun)
-            if not subject:
-                print(f"No eligible subject found for stage '{args.command}'.")
-                return 1
-            print(f"No subject specified. Running {args.command} for next eligible subject: {subject}")
-
-        return _run_subject_stage(args.command, subject, config, dry_run=args.dry_run, rerun=args.rerun)
+        return _handle_status(args, config)
 
     if args.command == "run":
-        if args.subject and args.all:
-            parser.error("Cannot specify a subject and --all together.")
-        if args.subject:
-            return _run_resume(args.subject, config, dry_run=args.dry_run)
-        return _run_resume_all(config, dry_run=args.dry_run)
+        return _handle_run(parser, args, config)
 
     if args.command == "exclude":
-        if not args.runs and not args.clear:
-            parser.error("You must provide --run or --clear.")
-        return _subject_exclusion(args.subject, config, args.runs or [], args.clear)
+        return _handle_exclude(parser, args, config)
 
     parser.error(f"Unknown command: {args.command}")
 
