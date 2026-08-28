@@ -1,5 +1,6 @@
 from pathlib import Path
-from ..core.subprocess_utils import path_exists, run_subprocess
+
+from ...core.subprocess_utils import path_exists, run_subprocess
 
 
 def run(subject, config, dry_run=False):
