@@ -1,11 +1,13 @@
 # Behavioral events processing
 
-The new behavioral events subsystem is designed to stay isolated from the existing pipeline stages while still fitting the package conventions.
+The behavioral events subsystem lives at `pipeline/processing/behavior/` and is wired into the pipeline
+as the `behavior` stage (`pipeline/stages/behavior.py`), following the same stage/processing-service
+convention as every other stage.
 
 ## Overview
 
 - Read raw E-Prime .edat3 files through the EPrimeReader abstraction.
-- Keep task-specific parsing in plugin parsers under hbicproc/behavior/parsers.
+- Keep task-specific parsing in plugin parsers under `pipeline/processing/behavior/parsers`.
 - Use JSON task configuration files for column mapping and optional metadata.
 - Generate BIDS-compatible events.tsv and events.json outputs.
 
@@ -13,10 +15,10 @@ The new behavioral events subsystem is designed to stay isolated from the existi
 
 1. Create a new task configuration JSON file in the configured behavior task config directory (default: code/behavior).
 2. Implement a new parser class that inherits TaskParser and register it in the parser registry.
-3. Add the task name to the parser registry in the workflow entry point or add a registration call for the new class.
+3. Add the task name to the parser registry in `pipeline/processing/behavior/service.py` or add a registration call for the new class.
 4. Run the CLI command:
 
-   hbicproc events --subject sub-001 --task your-task
+   hbicproc behavior sub-001 --task your-task
 
 ## Notes
 

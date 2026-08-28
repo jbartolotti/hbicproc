@@ -14,7 +14,7 @@ hbicproc validate sub-001
 hbicproc qc sub-001
 hbicproc exclude sub-001 --run task-nback_run-2
 hbicproc preprocess sub-001
-hbicproc fmriprep sub-001
+hbicproc behavior sub-001 --task stroop
 hbicproc run sub-001
 hbicproc status
 ```
@@ -24,7 +24,7 @@ Batch commands:
 ```bash
 hbicproc qc --all
 hbicproc preprocess --all
-hbicproc fmriprep --all
+hbicproc behavior --all
 hbicproc run --all
 ```
 
@@ -37,7 +37,14 @@ Stage commands also support `--rerun` to force execution even when a stage is ma
 3. `validate`
 4. `qc`
 5. `qc_review` (human step via `exclude`)
-6. `preprocess`
+6. `preprocess` (fMRIPrep, with optional FreeSurfer / FastSurfer integration)
+
+The `behavior` stage is optional and independent of the ordered pipeline above; it can be run at any
+time once E-Prime source files are available.
+
+Each stage is a thin `pipeline.stages` wrapper around a corresponding `pipeline.processing.<stage>.service`
+module. The CLI (`pipeline/cli.py`) builds its subcommands directly from the `STAGE_CLASSES` registry in
+`pipeline/stages/__init__.py`, so every registered stage automatically gets a CLI subcommand.
 
 ## Configuration
 
@@ -47,7 +54,8 @@ A sample configuration is available at `pipeline_config.sample.json`.
 
 ### fMRIPrep configuration
 
-The `fmriprep` section controls preprocessing and optional FreeSurfer / FastSurfer integration.
+The `fmriprep` section controls the `preprocess` stage, including optional FreeSurfer / FastSurfer integration.
+fMRIPrep is not a separate CLI command; it runs as part of `hbicproc preprocess`.
 
 - `fmriprep.singularity_image`: Singularity image reference for fMRIPrep.
 - `fmriprep.fmriprep_image`: explicit Singularity image for fMRIPrep (falls back to `singularity_image`).
@@ -127,7 +135,7 @@ The QC stage runs participant-level MRIQC and prints the exact next command for 
 
 ## Behavioral events configuration
 
-The `events` stage uses the `behavior` section of `pipeline_config.json` to locate E-Prime files, select task parsers, and write BIDS-style events outputs.
+The `behavior` stage uses the `behavior` section of `pipeline_config.json` to locate E-Prime files, select task parsers, and write BIDS-style events outputs.
 
 - `behavior.task_configs_dir`: directory containing JSON task configuration files for each supported task. The default example is `code/behavior`.
 - `behavior.parser_plugins_dir`: optional directory containing additional parser plugin modules for custom tasks. Files are loaded automatically when present.
@@ -147,7 +155,7 @@ Example:
 }
 ```
 
-The `events` stage expects task configuration JSON files in the configured task config directory. A worked example is included at `code/behavior/stroop.json`.
+The `behavior` stage expects task configuration JSON files in the configured task config directory. A worked example is included at `code/behavior/stroop.json`.
 
 ## Status reporting
 
