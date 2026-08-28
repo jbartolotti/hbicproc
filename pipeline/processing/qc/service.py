@@ -61,7 +61,7 @@ def run(subject, config, dry_run=False, rerun=False):
     )
 
     if not result["success"]:
-        return {"success": False, "message": result.get("message", "MRIQC failed."), **result}
+        return {"success": False, "message": result.get("message", "MRIQC failed."), "details": result}
 
     report_files = sorted(subject_output_dir.rglob("*.html"))
     if not report_files:
@@ -71,8 +71,7 @@ def run(subject, config, dry_run=False, rerun=False):
                 f"MRIQC completed but no HTML reports were found under {output_dir}.\n"
                 "Check the MRIQC output directory and container logs."
             ),
-            **result,
-            "output_dir": str(output_dir),
+            "details": {**result, "output_dir": str(output_dir)},
         }
 
     report_list = [str(path) for path in report_files[:5]]
@@ -87,7 +86,9 @@ def run(subject, config, dry_run=False, rerun=False):
         "success": True,
         "message": message,
         "next_command": f"hbicproc qc_review {subject}",
-        "command": result.get("command"),
-        "output_dir": str(output_dir),
-        "reports": report_list,
+        "details": {
+            "command": result.get("command"),
+            "output_dir": str(output_dir),
+            "reports": report_list,
+        },
     }
