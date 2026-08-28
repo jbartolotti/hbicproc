@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from .base import BaseStage, StageResult
-from ..utils import ensure_dir, run_command
+from ..core.paths import ensure_dir
+from ..core.subprocess_utils import run_command
 
 
 class BidsifyStage(BaseStage):

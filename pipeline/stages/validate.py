@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from .base import BaseStage, StageResult
-from ..utils import get_bids_root
+from ..core.paths import get_bids_root
 
 
 class ValidateStage(BaseStage):

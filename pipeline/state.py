@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from .utils import get_bids_root
+from .core.paths import get_bids_root
 
 STATE_FILE_NAME = ".pipeline_state.json"
 SUMMARY_FILE_NAME = "pipeline_summary.json"

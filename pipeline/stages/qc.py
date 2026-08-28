@@ -2,8 +2,8 @@ from pathlib import Path
 import shutil
 
 from .base import BaseStage, StageResult
-from ..container import SingularityRunner
-from ..utils import ensure_dir, get_bids_root
+from ..core.container import SingularityRunner
+from ..core.paths import ensure_dir, get_bids_root
 
 
 class QcStage(BaseStage):

@@ -2,8 +2,8 @@ import shlex
 import subprocess
 from pathlib import Path
 
-from ._utils import path_exists, run_subprocess
-from ..utils import get_bids_root, ensure_dir
+from ..core.subprocess_utils import path_exists, run_subprocess
+from ..core.paths import get_bids_root, ensure_dir
 
 
 def get_fmriprep_subjects(config):

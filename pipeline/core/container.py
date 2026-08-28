@@ -1,7 +1,8 @@
 import shlex
 from pathlib import Path
 
-from .utils import ensure_dir, run_command
+from .paths import ensure_dir
+from .subprocess_utils import run_command
 
 
 class SingularityRunner:

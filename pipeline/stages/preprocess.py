@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from .base import BaseStage, StageResult
-from ..container import SingularityRunner
-from ..utils import ensure_dir, load_json, get_bids_root
+from ..core.container import SingularityRunner
+from ..core.paths import ensure_dir, load_json, get_bids_root
 
 
 class PreprocessStage(BaseStage):

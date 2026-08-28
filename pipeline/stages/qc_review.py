@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from .base import BaseStage, StageResult
-from ..utils import load_json
+from ..core.paths import load_json
 
 
 class QcReviewStage(BaseStage):

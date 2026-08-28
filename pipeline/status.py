@@ -2,7 +2,7 @@ from pathlib import Path
 
 from .pipeline import PipelineRunner
 from .state import load_subject_state
-from .utils import get_bids_root
+from .core.paths import get_bids_root
 
 
 def _find_subject_rows(config):

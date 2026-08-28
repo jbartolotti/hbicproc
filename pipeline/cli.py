@@ -8,7 +8,7 @@ from .pipeline import PipelineRunner
 from .state import load_subject_state, save_subject_state
 from .logger import append_event
 from .status import save_pipeline_status_figure
-from .utils import list_subjects, write_json, load_json
+from .core.paths import list_subjects, write_json, load_json
 from .steps.fmriprep import (
     is_fmriprep_complete,
     run_fmriprep_subject,

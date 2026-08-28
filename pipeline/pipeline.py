@@ -3,7 +3,7 @@ from pathlib import Path
 from .state import load_subject_state, save_subject_state
 from .stages import STAGE_CLASSES
 from .stages.base import StageResult
-from .utils import list_subjects, subject_dir
+from .core.paths import list_subjects, subject_dir
 
 
 class PipelineRunner:
