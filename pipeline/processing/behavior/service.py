@@ -128,3 +128,31 @@ def run_behavior_events(
             print(f"[behavior][verbose] Events workflow failed: {exc}")
             traceback.print_exc()
         raise
+
+
+def run(subject, config, dry_run=False, rerun=False):
+    behavior_config = config.get("behavior", {})
+    tasks = behavior_config.get("tasks") or [None]
+
+    results = []
+    for task in tasks:
+        try:
+            results.append(run_behavior_events(subject, config, task_name=task, dry_run=dry_run))
+        except Exception as exc:
+            results.append({
+                "success": False,
+                "skipped": False,
+                "message": str(exc),
+                "command": "",
+                "returncode": None,
+            })
+
+    success = all(result.get("success") for result in results)
+    message = "\n".join(result.get("message", "") for result in results)
+
+    return {
+        "success": success,
+        "skipped": False,
+        "message": message,
+        "details": {"results": results},
+    }

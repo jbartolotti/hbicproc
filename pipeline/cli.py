@@ -3,7 +3,6 @@ import sys
 from pathlib import Path
 
 from .config import load_config, save_default_config
-from .steps.behavior import run_behavior_step
 from .runner import PipelineRunner
 from .state import load_subject_state, save_subject_state
 from .logger import append_event
@@ -82,29 +81,6 @@ def _run_resume_all(config, dry_run=False):
     return exit_code
 
 
-def _run_behavior_events(subject, config, task, dry_run=False):
-    try:
-        result = run_behavior_step(subject, config, task_name=task, dry_run=dry_run)
-    except Exception as exc:
-        result = {
-            "success": False,
-            "skipped": False,
-            "message": str(exc),
-            "command": "",
-            "returncode": None,
-        }
-
-    if result.get("skipped"):
-        print(f"SKIPPED: {result.get('message')}")
-    else:
-        print(result.get("message", ""))
-        if result.get("command"):
-            print(f"\nCommand:\n  {result['command']}")
-
-    append_event(result.get("message", ""), config, subject=subject, step="behavior")
-    return 0 if result.get("success") else 1
-
-
 def _subject_exclusion(subject, config, runs, clear):
     exclusions_file = Path(config["hbicproc"]["exclusions_file"])
     exclusions = load_json(exclusions_file, default={})
@@ -153,7 +129,7 @@ def main(argv=None):
     init_parser = subparsers.add_parser("init", help="Create a default pipeline config file.")
     init_parser.add_argument("path", help="Path to write a new config file.")
 
-    for stage_name in ["download", "bidsify", "validate", "qc", "preprocess", "events"]:
+    for stage_name in ["download", "bidsify", "validate", "qc", "preprocess", "behavior"]:
         stage_parser = subparsers.add_parser(stage_name, help=f"Run the {stage_name} stage for a subject.")
         stage_parser.add_argument("subject", nargs="?", help="Participant label, e.g. sub-011.")
         stage_parser.add_argument(
@@ -172,8 +148,8 @@ def main(argv=None):
                 action="store_true",
                 help="Print a summary of XNAT, session_names.tsv, and downloaded data.",
             )
-        elif stage_name == "events":
-            stage_parser.add_argument("--task", default="stroop", help="Behavioral task name to parse.")
+        elif stage_name == "behavior":
+            stage_parser.add_argument("--task", default=None, help="Behavioral task name to parse.")
 
     status_parser = subparsers.add_parser("status", help="Generate a pipeline status figure across subjects and stages.")
     status_parser.add_argument(
@@ -218,10 +194,7 @@ def main(argv=None):
         print(f"Pipeline status figure saved to: {figure_path}")
         return 0
 
-    if args.command == "events":
-        return _run_behavior_events(args.subject, config, args.task, dry_run=args.dry_run)
-
-    if args.command in ["download", "bidsify", "validate", "qc", "preprocess"]:
+    if args.command in ["download", "bidsify", "validate", "qc", "preprocess", "behavior"]:
         if args.command == "download" and args.summary and args.all:
             parser.error("Cannot specify --summary and --all together.")
 
@@ -235,6 +208,9 @@ def main(argv=None):
 
             return summarize_downloads(config)
 
+        if args.command == "behavior" and args.task:
+            config.setdefault("behavior", {})["tasks"] = [args.task]
+
         if args.all:
             if args.subject:
                 parser.error("Cannot specify a subject and --all together.")
@@ -242,6 +218,8 @@ def main(argv=None):
 
         subject = args.subject
         if not subject:
+            if args.command == "behavior":
+                parser.error("The behavior stage requires an explicit subject (or --all).")
             runner = PipelineRunner(config)
             subject = runner.get_subject_for_stage(args.command, rerun=args.rerun)
             if not subject:

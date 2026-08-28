@@ -92,6 +92,8 @@ def _apply_defaults(config):
             "exclusions_file": "derivatives/hbicproc/exclusions.json"
         },
         "behavior": {
+            "enabled": False,
+            "tasks": [],
             "task_configs_dir": "code/behavior",
             "parser_plugins_dir": "code/behavior/plugins",
             "edat3_search_root": "sourcedata",

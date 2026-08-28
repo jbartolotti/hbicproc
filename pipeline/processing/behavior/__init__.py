@@ -4,7 +4,7 @@ from .parsers.registry import ParserRegistry
 from .parsers.stroop import StroopParser
 from .reader import EPrimeReadError, EPrimeReader
 from .validator import validate_event_table
-from .workflow import run_behavior_events
+from .service import run_behavior_events
 from .writer import EventsWriter
 
 __all__ = [
