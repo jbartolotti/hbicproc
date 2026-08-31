@@ -91,6 +91,33 @@ def _apply_defaults(config):
         "hbicproc": {
             "exclusions_file": "derivatives/hbicproc/exclusions.json"
         },
+        "analysis": {
+            "subject": {
+                "activation": {
+                    "enabled": False,
+                    "tasks": [],
+                    "engine": "nilearn",
+                    "smoothing_fwhm": 6.0,
+                    "high_pass": 0.01,
+                    "drift_model": "cosine",
+                    "hrf_model": "spm",
+                    "output_dir": "derivatives/hbicproc",
+                    "fd_threshold": 0.5,
+                    "conditions": [],
+                    "contrasts": {},
+                    "confounds": {
+                        "motion": True,
+                        "motion_derivatives": True,
+                        "framewise_displacement": True,
+                        "acompcor": 5
+                    },
+                    "motion_qc": {
+                        "fd_threshold": 0.5,
+                        "fd_metric": "framewise_displacement"
+                    }
+                }
+            }
+        },
         "behavior": {
             "enabled": False,
             "tasks": [],
@@ -103,11 +130,10 @@ def _apply_defaults(config):
         }
     }
 
-    merged = defaults.copy()
-    merged.update(config)
+    merged = _deep_merge(defaults, config)
 
-    for key in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc", "behavior"]:
-        merged[key] = {**defaults.get(key, {}), **config.get(key, {})}
+    for key in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc", "analysis", "behavior"]:
+        merged[key] = _deep_merge(defaults.get(key, {}), config.get(key, {}))
 
     user_tokens = config.get("tokens", {})
     merged_tokens = {}
@@ -115,6 +141,19 @@ def _apply_defaults(config):
         extra_list = user_tokens.get(token_type, [])
         merged_tokens[token_type] = list(dict.fromkeys(default_list + extra_list))
     merged["tokens"] = merged_tokens
+    return merged
+
+
+def _deep_merge(base, override):
+    merged = {}
+    for key, value in base.items():
+        if isinstance(value, dict) and isinstance(override.get(key), dict):
+            merged[key] = _deep_merge(value, override[key])
+        else:
+            merged[key] = override.get(key, value)
+    for key, value in override.items():
+        if key not in merged:
+            merged[key] = value
     return merged
 
 
@@ -135,14 +174,20 @@ def _resolve_paths(config, root_dir):
     if config.get("bids_root"):
         config["bids_root"] = str(_resolve_path(config["bids_root"], root_dir, study_root))
 
-    for section in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc", "behavior"]:
+    for section in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc", "analysis", "behavior"]:
         section_data = config.get(section, {})
-        for key, value in section_data.items():
-            if key.endswith("_dir") or key.endswith("_path") or key.endswith("_file"):
-                section_data[key] = str(_resolve_path(value, root_dir, study_root))
+        _resolve_nested_paths(section_data, root_dir, study_root)
         config[section] = section_data
 
     return config
+
+
+def _resolve_nested_paths(section_data, root_dir, study_root):
+    for key, value in section_data.items():
+        if isinstance(value, dict):
+            _resolve_nested_paths(value, root_dir, study_root)
+        elif isinstance(value, str) and (key.endswith("_dir") or key.endswith("_path") or key.endswith("_file")):
+            section_data[key] = str(_resolve_path(value, root_dir, study_root))
 
 
 def _resolve_path(value, config_dir, study_root):

@@ -21,6 +21,20 @@ class TaskConfig:
     optional_columns: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        normalized: dict[str, ColumnConfig] = {}
+        for name, spec in (self.columns or {}).items():
+            if isinstance(spec, ColumnConfig):
+                normalized[name] = spec
+            elif isinstance(spec, dict):
+                normalized[name] = ColumnConfig(
+                    source=str(spec.get("source", "")),
+                    name=spec.get("name"),
+                )
+            else:
+                normalized[name] = ColumnConfig(source=str(spec or ""), name=None)
+        self.columns = normalized
+
     @classmethod
     def load(cls, path: str | Path) -> "TaskConfig":
         path = Path(path)

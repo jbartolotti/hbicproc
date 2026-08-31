@@ -20,7 +20,7 @@ class BaseStage:
     def run(self, subject, config, state, dry_run=False, rerun=False):
         raise NotImplementedError("Stage implementations must override run().")
 
-    def execute(self, subject, config, state, dry_run=False, rerun=False):
+    def execute(self, subject, config, state, dry_run=False, rerun=False, **kwargs):
         if self.state_key and state.get(self.state_key) and not rerun:
             return StageResult(
                 success=True,
@@ -28,7 +28,7 @@ class BaseStage:
                 message=f"Stage '{self.name}' already complete for {subject}.",
             )
 
-        result = self.run(subject, config, state, dry_run=dry_run, rerun=rerun)
+        result = self.run(subject, config, state, dry_run=dry_run, rerun=rerun, **kwargs)
 
         if result.success and not result.skipped and self.state_key and not self.human_step:
             state[self.state_key] = True

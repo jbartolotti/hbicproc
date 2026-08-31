@@ -32,6 +32,33 @@
   "hbicproc": {
     "exclusions_file": "derivatives/hbicproc/exclusions.json"
   },
+  "analysis": {
+    "subject": {
+      "activation": {
+        "enabled": false,
+        "tasks": [],
+        "engine": "nilearn",
+        "smoothing_fwhm": 6.0,
+        "high_pass": 0.01,
+        "drift_model": "cosine",
+        "hrf_model": "spm",
+        "output_dir": "derivatives/hbicproc",
+        "fd_threshold": 0.5,
+        "conditions": [],
+        "contrasts": {},
+        "confounds": {
+          "motion": true,
+          "motion_derivatives": true,
+          "framewise_displacement": true,
+          "acompcor": 5
+        },
+        "motion_qc": {
+          "fd_threshold": 0.5,
+          "fd_metric": "framewise_displacement"
+        }
+      }
+    }
+  },
   "behavior": {
     "task_configs_dir": "code/behavior",
     "parser_plugins_dir": "code/behavior/plugins",

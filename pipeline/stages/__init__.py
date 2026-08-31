@@ -1,3 +1,4 @@
+from .analysis import AnalysisStage
 from .bidsify import BidsifyStage
 from .behavior import BehaviorStage
 from .download import DownloadStage
@@ -13,5 +14,6 @@ STAGE_CLASSES = {
     "qc": QcStage,
     "qc_review": QcReviewStage,
     "preprocess": PreprocessStage,
+    "analysis": AnalysisStage,
     "behavior": BehaviorStage,
 }
