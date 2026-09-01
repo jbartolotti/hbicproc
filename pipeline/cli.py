@@ -1,4 +1,5 @@
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -246,6 +247,12 @@ def _build_parser():
 
 
 def main(argv=None):
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        force=True,
+    )
+
     parser = _build_parser()
     args = parser.parse_args(argv)
 

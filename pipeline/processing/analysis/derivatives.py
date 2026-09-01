@@ -6,6 +6,30 @@ from pathlib import Path
 class DerivativePathBuilder:
     """Build BIDS-derivatives paths with exact subject/session/task/run entities."""
 
+    @classmethod
+    def build_directory(
+        cls,
+        base_dir: str | Path,
+        *,
+        subject: str | None = None,
+        session: str | None = None,
+        task: str | None = None,
+        run: str | None = None,
+    ) -> Path:
+        path = Path(base_dir)
+
+        for value, prefix in (
+            (subject, "sub-"),
+            (session, "ses-"),
+            (task, "task-"),
+            (run, "run-"),
+        ):
+            normalized = cls._normalize_entity(value, prefix=prefix)
+            if normalized is None:
+                continue
+            path = path / f"{prefix}{normalized}"
+        return path
+
     @staticmethod
     def _normalize_entity(value: str | None, *, prefix: str | None = None) -> str | None:
         if value is None:

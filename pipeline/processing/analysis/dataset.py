@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from bids import BIDSLayout, BIDSLayoutIndexer
+
+logger = logging.getLogger(__name__)
 
 
 _ENTITY_ALIASES = {
@@ -97,12 +100,25 @@ class DatasetIndex:
         run: str | None = None,
     ) -> list[AnalysisRun]:
         if self.layout is None:
+            logger.info("Dataset discovery skipped for subject=%s task=%s: BIDSLayout is unavailable for %s", subject, task, self.bids_root)
             return []
 
         normalized_subject = _normalize_entity_text(subject, prefix="sub") if subject is not None else None
         normalized_task = _normalize_entity_text(task, prefix="task") if task is not None else None
         normalized_session = _normalize_entity_text(session, prefix="ses") if session is not None else None
         normalized_run = _normalize_entity_text(run, prefix="run") if run is not None else None
+
+        logger.info(
+            "Dataset discovery requested: subject=%s task=%s session=%s run=%s (normalized: subject=%s task=%s session=%s run=%s)",
+            subject,
+            task,
+            session,
+            run,
+            normalized_subject,
+            normalized_task,
+            normalized_session,
+            normalized_run,
+        )
 
         bold_records = self._query(
             suffix="bold",
@@ -130,6 +146,18 @@ class DatasetIndex:
             session=normalized_session,
             run=normalized_run,
         )
+
+        logger.info(
+            "Dataset discovery counts: subject=%s task=%s BOLD=%d EVENTS=%d CONFOUNDS=%d",
+            normalized_subject,
+            normalized_task,
+            len(bold_records),
+            len(events_records),
+            len(confounds_records),
+        )
+        logger.info("Discovered BOLD files: %s", [str(getattr(record, 'path', record)) for record in bold_records])
+        logger.info("Discovered events files: %s", [str(getattr(record, 'path', record)) for record in events_records])
+        logger.info("Discovered confounds files: %s", [str(getattr(record, 'path', record)) for record in confounds_records])
 
         runs: list[AnalysisRun] = []
         seen: set[tuple[str, str, str | None, str | None]] = set()
@@ -172,18 +200,18 @@ class DatasetIndex:
                 continue
             seen.add(key)
 
-            runs.append(
-                AnalysisRun(
-                    subject=subject_value or "",
-                    task=task_value or "",
-                    session=session_value,
-                    run=run_value,
-                    bold_path=Path(str(bold_record.path)),
-                    events_path=Path(str(event_match.path)),
-                    confounds_path=Path(str(confounds_match.path)),
-                )
+            resolved_run = AnalysisRun(
+                subject=subject_value or "",
+                task=task_value or "",
+                session=session_value,
+                run=run_value,
+                bold_path=Path(str(bold_record.path)),
+                events_path=Path(str(event_match.path)),
+                confounds_path=Path(str(confounds_match.path)),
             )
+            runs.append(resolved_run)
 
+        logger.info("Resolved AnalysisRun objects for subject=%s task=%s: %s", normalized_subject, normalized_task, [run.as_dict() for run in runs])
         return sorted(runs, key=lambda item: (item.session or "", item.run or ""))
 
     def _query(self, **filters: Any) -> list[Any]:

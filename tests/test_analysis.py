@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -99,6 +100,33 @@ def test_derivative_path_builder_replaces_underscores_with_hyphens() -> None:
     )
 
     assert path.name == "sub-01_ses-baseline-session_task-rest-task_run-2_desc-condition-a_stat-effect-map.nii.gz"
+
+
+def test_derivative_path_builder_builds_session_directory_with_bids_prefix() -> None:
+    directory = DerivativePathBuilder.build_directory("derivatives/hbicproc", subject="sub-01", session="baseline")
+
+    assert directory == Path("derivatives/hbicproc/sub-01/ses-baseline")
+
+
+def test_dataset_index_logs_discovery(caplog: pytest.LogCaptureFixture, tmp_path: Path) -> None:
+    bids_root = tmp_path / "bids"
+    bids_root.mkdir(parents=True, exist_ok=True)
+    (bids_root / "dataset_description.json").write_text('{"Name": "Test dataset", "BIDSVersion": "1.8.0"}', encoding="utf-8")
+
+    func_dir = bids_root / "sub-001" / "ses-baseline" / "func"
+    func_dir.mkdir(parents=True, exist_ok=True)
+    (func_dir / "sub-001_ses-baseline_task-rest_run-1_bold.nii.gz").touch()
+    (func_dir / "sub-001_ses-baseline_task-rest_run-1_events.tsv").touch()
+    (func_dir / "sub-001_ses-baseline_task-rest_run-1_desc-confounds_timeseries.tsv").touch()
+
+    with caplog.at_level(logging.INFO):
+        dataset = DatasetIndex(bids_root)
+        runs = dataset.get_task_runs(subject="001", task="rest")
+
+    assert len(runs) == 1
+    assert "Dataset discovery requested" in caplog.text
+    assert "Discovered BOLD files" in caplog.text
+    assert "Resolved AnalysisRun objects" in caplog.text
 
 
 def test_dataset_index_matches_exact_bids_entities(tmp_path: Path) -> None:

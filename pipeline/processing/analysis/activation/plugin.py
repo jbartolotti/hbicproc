@@ -150,6 +150,13 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
     ) -> list[AnalysisResult]:
         dataset = DatasetIndex.from_config(config)
         run_infos = [run.as_dict() for run in dataset.get_task_runs(subject=subject, task=task)]
+        logger.info(
+            "Activation discovery complete: subject=%s task=%s runs=%d raw_run_objects=%s",
+            subject,
+            task,
+            len(run_infos),
+            run_infos,
+        )
         if not run_infos:
             return [
                 AnalysisResult(
@@ -205,11 +212,20 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         )
 
         output_root = self._resolve_output_root(config, plugin_cfg)
-        output_dir = output_root / normalized_subject
-        if session_label:
-            output_dir = output_dir / session_label
-        output_dir = output_dir / "func"
+        output_dir = DerivativePathBuilder.build_directory(
+            output_root,
+            subject=normalized_subject,
+            session=session_label,
+        ) / "func"
         output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            "Resolved activation output directory for subject=%s session=%s task=%s run=%s: %s",
+            normalized_subject,
+            session_label or "unspecified",
+            task,
+            run_label,
+            output_dir,
+        )
 
         if dry_run:
             return AnalysisResult(
