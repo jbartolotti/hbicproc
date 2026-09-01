@@ -2,6 +2,7 @@ import json
 import logging
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from pipeline.cli import _build_parser
@@ -77,6 +78,117 @@ def test_activation_plugin_expands_confounds_from_config() -> None:
     assert "trans_y_derivative1" in expanded
     assert "framewise_displacement" in expanded
     assert "a_comp_cor_04" in expanded
+
+
+def test_activation_plugin_saves_design_png_from_nilearn_axes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    class FakeFigure:
+        def savefig(self, path: Path, **kwargs: object) -> None:
+            _ = kwargs
+            Path(path).write_bytes(b"png")
+
+    class FakeAxes:
+        figure = FakeFigure()
+
+    monkeypatch.setattr(
+        "nilearn.plotting.plot_design_matrix",
+        lambda design_matrix, rescale: (design_matrix, rescale, FakeAxes())[-1],
+    )
+
+    output_path = tmp_path / "design_matrix.png"
+    ActivationAnalysisPlugin()._save_design_png(pd.DataFrame({"condition": [0.0, 1.0]}), output_path)
+
+    assert output_path.read_bytes() == b"png"
+
+
+def test_activation_png_failure_does_not_prevent_scientific_outputs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output_order: list[str] = []
+
+    class FakeImage:
+        def __init__(self, label: str) -> None:
+            self.label = label
+
+        def to_filename(self, path: Path) -> None:
+            output_order.append(self.label)
+            Path(path).write_bytes(self.label.encode("utf-8"))
+
+    class FakeReport:
+        def save_as_html(self, path: Path) -> None:
+            output_order.append("report")
+            Path(path).write_text("<html></html>", encoding="utf-8")
+
+    class FakeMasker:
+        mask_img_ = FakeImage("mask")
+
+    class FakeFirstLevelModel:
+        def __init__(self, **kwargs: object) -> None:
+            _ = kwargs
+            self.design_matrices_: list[pd.DataFrame] = []
+            self.residuals_ = [FakeImage("residual")]
+            self.masker_ = FakeMasker()
+
+        def fit(self, _bold_path: Path, *, events: pd.DataFrame, confounds: None) -> None:
+            _ = (_bold_path, events, confounds)
+            self.design_matrices_ = [pd.DataFrame({"condition": [0.0, 1.0]})]
+
+        def compute_contrast(self, _expression: str, *, output_type: str) -> FakeImage:
+            _ = _expression
+            return FakeImage(output_type)
+
+        def generate_report(self, *, contrasts: dict[str, str]) -> FakeReport:
+            _ = contrasts
+            return FakeReport()
+
+    monkeypatch.setattr("nilearn.glm.first_level.FirstLevelModel", FakeFirstLevelModel)
+
+    plugin = ActivationAnalysisPlugin()
+
+    def fake_read_repetition_time(bold_path: Path) -> float:
+        _ = bold_path
+        return 2.0
+
+    monkeypatch.setattr(
+        plugin,
+        "_read_repetition_time",
+        fake_read_repetition_time,
+    )
+
+    def fail_design_png(_design_matrix: pd.DataFrame, _path: Path) -> None:
+        _ = (_design_matrix, _path)
+        output_order.append("design_png")
+        raise RuntimeError("optional PNG failure")
+
+    monkeypatch.setattr(plugin, "_save_design_png", fail_design_png)
+
+    events_path = tmp_path / "events.tsv"
+    events_path.write_text("onset\tduration\ttrial_type\n0\t1\tcondition\n", encoding="utf-8")
+    confounds_path = tmp_path / "confounds.tsv"
+    confounds_path.write_text("trans_x\n0.1\n", encoding="utf-8")
+    bold_path = tmp_path / "bold.nii.gz"
+    bold_path.touch()
+
+    result = plugin._run_single_run(
+        "001",
+        "rest",
+        {
+            "subject": "001",
+            "session": "BL",
+            "task": "rest",
+            "run": "1",
+            "bold_path": bold_path,
+            "events_path": events_path,
+            "confounds_path": confounds_path,
+        },
+        {"study_root": str(tmp_path)},
+        {"enabled": True, "contrasts": {"condition": "condition"}},
+    )
+
+    assert result.success is True
+    assert output_order.index("design_png") > output_order.index("mask")
+    assert output_order[-1] == "report"
+    assert len(list((tmp_path / "derivatives" / "hbicproc" / "sub-001" / "ses-BL" / "func").glob("*.nii.gz"))) >= 5
 
 
 def test_dataset_index_normalizes_session_and_run_entities_without_prefix() -> None:

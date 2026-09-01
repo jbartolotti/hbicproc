@@ -275,14 +275,6 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         )
         glm.fit(run_info["bold_path"], events=events, confounds=confounds if not confounds.empty else None)
 
-        logger.info(
-            "Generating activation contrasts for subject=%s session=%s task=%s run=%s",
-            normalized_subject,
-            session_label or "unspecified",
-            task,
-            run_label,
-        )
-        contrast_map = self._build_contrast_map(plugin_cfg)
         design_matrix = glm.design_matrices_[0]
 
         design_matrix_path = self._output_path(
@@ -297,17 +289,14 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         logger.info("Saving design matrix CSV for subject=%s session=%s task=%s run=%s", normalized_subject, session_label or "unspecified", task, run_label)
         design_matrix.to_csv(design_matrix_path, index=False)
 
-        design_png_path = self._output_path(
-            output_dir,
-            subject=normalized_subject,
-            session=session_label,
-            task=task,
-            run=run_label,
-            desc="design_matrix",
-            suffix=".png",
+        logger.info(
+            "Generating activation contrasts for subject=%s session=%s task=%s run=%s",
+            normalized_subject,
+            session_label or "unspecified",
+            task,
+            run_label,
         )
-        logger.info("Saving design matrix PNG for subject=%s session=%s task=%s run=%s", normalized_subject, session_label or "unspecified", task, run_label)
-        self._save_design_png(design_matrix, design_png_path)
+        contrast_map = self._build_contrast_map(plugin_cfg)
 
         fd_threshold = float(
             plugin_cfg.get("fd_threshold", plugin_cfg.get("motion_qc", {}).get("fd_threshold", 0.5))
@@ -325,20 +314,17 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         logger.info("Saving motion QC for subject=%s session=%s task=%s run=%s", normalized_subject, session_label or "unspecified", task, run_label)
         motion_qc_path.write_text(json.dumps(motion_qc, indent=2), encoding="utf-8")
 
-        generated_paths = [
-            str(design_matrix_path),
-            str(design_png_path),
-            str(motion_qc_path),
-        ]
+        generated_paths = [str(design_matrix_path), str(motion_qc_path)]
 
         for contrast_name, expression in contrast_map.items():
             logger.info(
-                "Saving contrast outputs for subject=%s session=%s task=%s run=%s contrast=%s",
+                "Computing contrast for subject=%s session=%s task=%s run=%s contrast=%s expression=%s",
                 normalized_subject,
                 session_label or "unspecified",
                 task,
                 run_label,
                 contrast_name,
+                expression,
             )
             effect_map = glm.compute_contrast(expression, output_type="effect_size")
             z_map = glm.compute_contrast(expression, output_type="z_score")
@@ -374,8 +360,35 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
                 stat="variance",
                 suffix=".nii.gz",
             )
+            logger.info(
+                "Saving effect map for subject=%s session=%s task=%s run=%s contrast=%s path=%s",
+                normalized_subject,
+                session_label or "unspecified",
+                task,
+                run_label,
+                contrast_name,
+                effect_path,
+            )
             effect_map.to_filename(effect_path)
+            logger.info(
+                "Saving z map for subject=%s session=%s task=%s run=%s contrast=%s path=%s",
+                normalized_subject,
+                session_label or "unspecified",
+                task,
+                run_label,
+                contrast_name,
+                z_path,
+            )
             z_map.to_filename(z_path)
+            logger.info(
+                "Saving variance map for subject=%s session=%s task=%s run=%s contrast=%s path=%s",
+                normalized_subject,
+                session_label or "unspecified",
+                task,
+                run_label,
+                contrast_name,
+                variance_path,
+            )
             variance_map.to_filename(variance_path)
             generated_paths.extend([str(effect_path), str(z_path), str(variance_path)])
 
@@ -401,6 +414,15 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
                 desc=condition,
                 stat="effect",
                 suffix=".nii.gz",
+            )
+            logger.info(
+                "Saving condition effect map for subject=%s session=%s task=%s run=%s condition=%s path=%s",
+                normalized_subject,
+                session_label or "unspecified",
+                task,
+                run_label,
+                condition,
+                effect_path,
             )
             effect_map.to_filename(effect_path)
             generated_paths.append(str(effect_path))
@@ -444,6 +466,29 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
             mask_img.to_filename(mask_path)
             generated_paths.append(str(mask_path))
 
+        design_png_path = self._output_path(
+            output_dir,
+            subject=normalized_subject,
+            session=session_label,
+            task=task,
+            run=run_label,
+            desc="design_matrix",
+            suffix=".png",
+        )
+        try:
+            logger.info("Generating design matrix PNG for subject=%s session=%s task=%s run=%s", normalized_subject, session_label or "unspecified", task, run_label)
+            self._save_design_png(design_matrix, design_png_path)
+            generated_paths.append(str(design_png_path))
+        except Exception:
+            logger.warning(
+                "Failed to generate design matrix PNG for subject=%s session=%s task=%s run=%s; scientific outputs were preserved.",
+                normalized_subject,
+                session_label or "unspecified",
+                task,
+                run_label,
+                exc_info=True,
+            )
+
         report_path = self._output_path(
             output_dir,
             subject=normalized_subject,
@@ -456,7 +501,7 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         report_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             logger.info(
-                "Generating Nilearn HTML report for subject=%s session=%s task=%s run=%s",
+                "Generating HTML report with Nilearn for subject=%s session=%s task=%s run=%s",
                 normalized_subject,
                 session_label or "unspecified",
                 task,
@@ -589,10 +634,18 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
     def _save_design_png(self, design_matrix: pd.DataFrame, path: Path) -> None:
         from nilearn.plotting import plot_design_matrix
 
-        figure = plot_design_matrix(design_matrix, rescale=True)
+        plot_result = plot_design_matrix(design_matrix, rescale=True)
+        if hasattr(plot_result, "savefig"):
+            plot_result.savefig(path, bbox_inches="tight")
+            return
+
+        figure = getattr(plot_result, "figure", None)
+        if figure is None and hasattr(plot_result, "get_figure"):
+            figure = plot_result.get_figure()
         if hasattr(figure, "savefig"):
             figure.savefig(path, bbox_inches="tight")
             return
+
         raise TypeError("Nilearn plot_design_matrix did not return a figure-like object for the current version.")
 
     def _summarize_motion_qc(self, confounds: pd.DataFrame, fd_threshold: float) -> dict[str, float | int]:
