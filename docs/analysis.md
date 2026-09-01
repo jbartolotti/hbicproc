@@ -22,6 +22,26 @@ The plugin layer remains available behind the processing service for extensibili
 
 This keeps the scientific logic modular without breaking the project’s stage-first architecture.
 
+## Dataset index / BIDS discovery layer
+
+Analysis discovery is intentionally centralized in a shared dataset index instead of being reimplemented in each plugin. The core abstraction lives in `pipeline/processing/analysis/dataset.py` and exposes an `AnalysisRun` dataclass plus a `DatasetIndex` helper built on PyBIDS.
+
+A typical call path looks like this:
+
+```python
+from pipeline.processing.analysis.dataset import DatasetIndex
+
+dataset = DatasetIndex.from_config(config)
+runs = dataset.get_task_runs(subject="001", task="rest")
+
+for run in runs:
+    print(run.subject, run.session, run.run, run.bold_path)
+```
+
+This keeps plugin code focused on scientific processing and avoids repeated recursive filesystem scans or BIDS entity parsing in each analysis method.
+
+The dataset index uses PyBIDS to build a BIDSLayout for the configured dataset root and resolves run-level metadata with subject/task/session/run matching from the indexed layout rather than by custom `rglob` traversal.
+
 ## Activation plugin requirements
 
 The activation plugin is intentionally generic and configuration-driven. It does not carry task-specific or study-specific defaults.

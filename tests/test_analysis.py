@@ -5,8 +5,8 @@ import pytest
 
 from pipeline.cli import _build_parser
 from pipeline.config import load_default_config
-from pipeline.processing.analysis import AnalysisPluginRegistry
-from pipeline.processing.analysis.activation.plugin import ActivationAnalysisPlugin, _parse_bids_entities
+from pipeline.processing.analysis import AnalysisPluginRegistry, DatasetIndex
+from pipeline.processing.analysis.activation.plugin import ActivationAnalysisPlugin
 from pipeline.processing.analysis.derivatives import DerivativePathBuilder
 from pipeline.stages import STAGE_CLASSES
 
@@ -78,12 +78,13 @@ def test_activation_plugin_expands_confounds_from_config() -> None:
     assert "a_comp_cor_04" in expanded
 
 
-def test_activation_plugin_normalizes_session_entities_without_prefix() -> None:
-    entities = _parse_bids_entities(Path("sub-01_ses-baseline_task-rest_run-1_bold.nii.gz"))
+def test_dataset_index_normalizes_session_and_run_entities_without_prefix() -> None:
+    dataset = DatasetIndex(".")
+    entities = {"subject": "01", "session": "baseline", "task": "rest", "run": "1"}
 
-    assert entities["ses"] == "baseline"
-    assert "ses-" not in entities["ses"]
-    assert entities["run"] == "1"
+    assert dataset._entity_value(entities, "session") == "baseline"
+    assert "ses-" not in dataset._entity_value(entities, "session")
+    assert dataset._entity_value(entities, "run") == "1"
 
 
 def test_derivative_path_builder_replaces_underscores_with_hyphens() -> None:
@@ -100,7 +101,7 @@ def test_derivative_path_builder_replaces_underscores_with_hyphens() -> None:
     assert path.name == "sub-01_ses-baseline-session_task-rest-task_run-2_desc-condition-a_stat-effect-map.nii.gz"
 
 
-def test_activation_plugin_matches_exact_bids_entities(tmp_path: Path) -> None:
+def test_dataset_index_matches_exact_bids_entities(tmp_path: Path) -> None:
     study_root = tmp_path
     func_dir = study_root / "sub-01" / "func"
     func_dir.mkdir(parents=True, exist_ok=True)
@@ -118,15 +119,14 @@ def test_activation_plugin_matches_exact_bids_entities(tmp_path: Path) -> None:
     (func_dir / "sub-01_task-rest_run-1_bold.json").write_text(json.dumps({"RepetitionTime": 2.0}), encoding="utf-8")
     (func_dir / "sub-010_task-rest_run-2_bold.json").write_text(json.dumps({"RepetitionTime": 2.0}), encoding="utf-8")
 
-    config = {"study_root": str(study_root), "bids_root": str(study_root)}
-    plugin = ActivationAnalysisPlugin()
-
-    run_infos = plugin._discover_run_files("sub-01", "rest", config)
+    dataset = DatasetIndex(study_root)
+    run_infos = [run.as_dict() for run in dataset.get_task_runs(subject="01", task="rest")]
 
     assert len(run_infos) == 1
     assert run_infos[0]["run"] == "1"
-    assert run_infos[0]["bold_path"].name.startswith("sub-01_task-rest_run-1")
+    assert Path(run_infos[0]["bold_path"]).name.startswith("sub-01_task-rest_run-1")
 
+    plugin = ActivationAnalysisPlugin()
     with pytest.raises(ValueError, match="RepetitionTime"):
         missing = study_root / "sub-02" / "func" / "sub-02_task-rest_run-1_bold.nii.gz"
         missing.parent.mkdir(parents=True, exist_ok=True)

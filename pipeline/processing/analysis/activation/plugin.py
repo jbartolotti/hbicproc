@@ -12,6 +12,7 @@ matplotlib.use("Agg")
 import pandas as pd
 
 from ..base import AnalysisPlugin, AnalysisResult
+from ..dataset import DatasetIndex
 from ..derivatives import DerivativePathBuilder
 
 logger = logging.getLogger(__name__)
@@ -31,38 +32,6 @@ def _normalize_entity_value(value: Any, *, entity_name: str) -> str:
             break
 
     return text.replace("_", "-")
-
-
-def _strip_entity_prefix(value: Any, prefix: str) -> str:
-    if value is None:
-        return ""
-    text = str(value).strip()
-    if not text:
-        return ""
-    for candidate_prefix in (prefix, prefix.replace("-", "_")):
-        if text.lower().startswith(candidate_prefix.lower()):
-            text = text[len(candidate_prefix) :]
-            break
-    return text.replace("_", "-")
-
-
-def _parse_bids_entities(path: Path) -> dict[str, str]:
-    stem = path.name
-    for suffix in (".nii.gz", ".nii", ".tsv", ".json"):
-        if stem.endswith(suffix):
-            stem = stem[: -len(suffix)]
-            break
-
-    entities: dict[str, str] = {}
-    for token in stem.split("_"):
-        if "-" not in token and "_" not in token:
-            continue
-        key, _, raw_value = token.partition("-")
-        if not raw_value and "_" in token:
-            key, _, raw_value = token.partition("_")
-        if key in {"sub", "ses", "task", "run", "desc", "stat"}:
-            entities[key] = _normalize_entity_value(raw_value or token, entity_name=key)
-    return entities
 
 
 class ActivationAnalysisPlugin(AnalysisPlugin):
@@ -179,7 +148,8 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         *,
         dry_run: bool = False,
     ) -> list[AnalysisResult]:
-        run_infos = self._discover_run_files(subject, task, config)
+        dataset = DatasetIndex.from_config(config)
+        run_infos = [run.as_dict() for run in dataset.get_task_runs(subject=subject, task=task)]
         if not run_infos:
             return [
                 AnalysisResult(
@@ -209,89 +179,6 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
             else:
                 results.append(result)
         return results
-
-    def _discover_run_files(self, subject: str, task: str, config: dict[str, Any]) -> list[dict[str, Any]]:
-        study_root = Path(config.get("study_root", "."))
-        bids_root = Path(config.get("bids_root") or config.get("study_root", "."))
-
-        roots = [
-            bids_root,
-            study_root,
-            study_root / "derivatives",
-            study_root / "derivatives" / "fmriprep",
-        ]
-
-        bold_files: list[Path] = []
-        event_files: list[Path] = []
-        confounds_files: list[Path] = []
-        seen: set[str] = set()
-
-        for root in roots:
-            if not root.exists():
-                continue
-
-            for candidate in sorted(root.rglob("*.nii.gz")) + sorted(root.rglob("*.nii")):
-                if "bold" not in candidate.name.lower() or "sbref" in candidate.name.lower():
-                    continue
-                if not self._matches_bids_entity(candidate, "sub", subject):
-                    continue
-                if not self._matches_bids_entity(candidate, "task", task):
-                    continue
-                key = str(candidate)
-                if key not in seen:
-                    bold_files.append(candidate)
-                    seen.add(key)
-
-            for candidate in sorted(root.rglob("*_events.tsv")):
-                if not self._matches_bids_entity(candidate, "sub", subject):
-                    continue
-                if not self._matches_bids_entity(candidate, "task", task):
-                    continue
-                key = str(candidate)
-                if key not in seen:
-                    event_files.append(candidate)
-                    seen.add(key)
-
-            for candidate in sorted(root.rglob("*_confounds_timeseries.tsv")) + sorted(root.rglob("*_desc-confounds_timeseries.tsv")):
-                if not self._matches_bids_entity(candidate, "sub", subject):
-                    continue
-                if not self._matches_bids_entity(candidate, "task", task):
-                    continue
-                key = str(candidate)
-                if key not in seen:
-                    confounds_files.append(candidate)
-                    seen.add(key)
-
-        run_infos: list[dict[str, Any]] = []
-        normalized_subject = _normalize_entity_value(subject, entity_name="sub")
-        for bold_path in bold_files:
-            bold_entities = _parse_bids_entities(bold_path)
-            session_label = _normalize_entity_value(bold_entities.get("ses"), entity_name="ses")
-            run_label = _normalize_entity_value(bold_entities.get("run"), entity_name="run")
-            matching_events = [
-                event_path for event_path in event_files if self._matches_run_metadata(event_path, normalized_subject, task, session=session_label, run=run_label)
-            ]
-            matching_confounds = [
-                confounds_path
-                for confounds_path in confounds_files
-                if self._matches_run_metadata(confounds_path, normalized_subject, task, session=session_label, run=run_label)
-            ]
-            if not matching_events or not matching_confounds:
-                continue
-
-            run_infos.append(
-                {
-                    "subject": normalized_subject,
-                    "task": task,
-                    "session": session_label,
-                    "run": run_label,
-                    "bold_path": bold_path,
-                    "events_path": matching_events[0],
-                    "confounds_path": matching_confounds[0],
-                }
-            )
-
-        return sorted(run_infos, key=lambda item: (item.get("session") or "", item.get("run") or ""))
 
     def _run_single_run(
         self,
@@ -736,31 +623,3 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
             suffix=suffix,
         )
 
-    def _matches_bids_entity(self, path: Path, entity_name: str, expected_value: str) -> bool:
-        entities = _parse_bids_entities(path)
-        actual = entities.get(entity_name)
-        if actual is None:
-            return False
-        actual_value = _strip_entity_prefix(actual, f"{entity_name}-")
-        expected_value = _strip_entity_prefix(expected_value, f"{entity_name}-")
-        return actual_value == expected_value
-
-    def _matches_run_metadata(
-        self,
-        path: Path,
-        subject: str,
-        task: str,
-        *,
-        session: str | None = None,
-        run: str | None = None,
-    ) -> bool:
-        entities = _parse_bids_entities(path)
-        if _strip_entity_prefix(entities.get("sub"), "sub-") != _strip_entity_prefix(subject, "sub-"):
-            return False
-        if _strip_entity_prefix(entities.get("task"), "task-") != _strip_entity_prefix(task, "task-"):
-            return False
-        if session is not None and _strip_entity_prefix(entities.get("ses"), "ses-") != _strip_entity_prefix(session, "ses-"):
-            return False
-        if run is not None and _strip_entity_prefix(entities.get("run"), "run-") != _strip_entity_prefix(run, "run-"):
-            return False
-        return True

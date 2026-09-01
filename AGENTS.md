@@ -119,3 +119,18 @@ CLI (pipeline/cli.py)
   `pipeline/processing/<domain>/service.py`.
 - Do not recreate a `pipeline/steps/` bypass package.
 - Do not assume `STAGE_CLASSES` and `PipelineRunner.stage_order` are the same set.
+
+## Refactoring and tests
+
+- Architecture and design decisions take precedence over existing tests.
+- Do not reintroduce removed code, legacy interfaces, compatibility shims, adapters, or duplicate implementations solely to make old tests pass.
+- When a refactor intentionally changes behavior or APIs, update or replace the tests to match the new design.
+- Prefer deleting obsolete code and tests over maintaining parallel old and new implementations.
+- If functionality becomes centralized (for example, BIDS discovery), remove duplicate implementations elsewhere rather than preserving them for backwards compatibility.
+
+## Single source of truth
+
+- Shared functionality must have a single authoritative implementation.
+- Do not duplicate logic across plugins, stages, or services.
+- If multiple components need the same behavior, move that behavior into shared infrastructure rather than copying it.
+- When introducing a new shared abstraction, migrate existing callers to it instead of maintaining the previous implementation in parallel.
