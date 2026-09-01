@@ -52,8 +52,8 @@ def _apply_defaults(config):
             "project_id": "MY_PROJECT",
             "credentials_file": "pipeline/xnat_credentials.example.json",
             "session_names_file": "",
-            "session_names_delimiter": "_",
             "output_dir": "sourcedata",
+            "session_names_delimiter": "_",
             "verify_ssl": True
         },
         "bidskit": {
@@ -92,6 +92,7 @@ def _apply_defaults(config):
             "exclusions_file": "derivatives/hbicproc/exclusions.json"
         },
         "analysis": {
+            "derivative_dataset": "fmriprep",
             "subject": {
                 "activation": {
                     "enabled": False,

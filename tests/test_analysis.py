@@ -113,11 +113,17 @@ def test_dataset_index_logs_discovery(caplog: pytest.LogCaptureFixture, tmp_path
     bids_root.mkdir(parents=True, exist_ok=True)
     (bids_root / "dataset_description.json").write_text('{"Name": "Test dataset", "BIDSVersion": "1.8.0"}', encoding="utf-8")
 
-    func_dir = bids_root / "sub-001" / "ses-baseline" / "func"
-    func_dir.mkdir(parents=True, exist_ok=True)
-    (func_dir / "sub-001_ses-baseline_task-rest_run-1_bold.nii.gz").touch()
-    (func_dir / "sub-001_ses-baseline_task-rest_run-1_events.tsv").touch()
-    (func_dir / "sub-001_ses-baseline_task-rest_run-1_desc-confounds_timeseries.tsv").touch()
+    raw_func_dir = bids_root / "sub-001" / "ses-baseline" / "func"
+    derivative_func_dir = bids_root / "derivatives" / "fmriprep" / "sub-001" / "ses-baseline" / "func"
+    raw_func_dir.mkdir(parents=True, exist_ok=True)
+    derivative_func_dir.mkdir(parents=True, exist_ok=True)
+    (bids_root / "derivatives" / "fmriprep" / "dataset_description.json").write_text(
+        '{"Name": "fMRIPrep", "BIDSVersion": "1.8.0"}',
+        encoding="utf-8",
+    )
+    (derivative_func_dir / "sub-001_ses-baseline_task-rest_run-1_desc-preproc_bold.nii.gz").touch()
+    (raw_func_dir / "sub-001_ses-baseline_task-rest_run-1_events.tsv").touch()
+    (derivative_func_dir / "sub-001_ses-baseline_task-rest_run-1_desc-confounds_timeseries.tsv").touch()
 
     with caplog.at_level(logging.INFO):
         dataset = DatasetIndex(bids_root)
@@ -131,23 +137,27 @@ def test_dataset_index_logs_discovery(caplog: pytest.LogCaptureFixture, tmp_path
 
 def test_dataset_index_matches_exact_bids_entities(tmp_path: Path) -> None:
     study_root = tmp_path
-    func_dir = study_root / "sub-01" / "func"
-    func_dir.mkdir(parents=True, exist_ok=True)
+    raw_func_dir = study_root / "sub-01" / "func"
+    derivative_root = study_root / "derivatives" / "custom-preproc"
+    raw_func_dir.mkdir(parents=True, exist_ok=True)
+    derivative_root.mkdir(parents=True, exist_ok=True)
+    (derivative_root / "dataset_description.json").write_text(
+        '{"Name": "Custom preprocessing", "BIDSVersion": "1.8.0"}',
+        encoding="utf-8",
+    )
 
-    for path_suffix in [
-        "sub-01_task-rest_run-1_bold.nii.gz",
-        "sub-01_task-rest_run-1_events.tsv",
-        "sub-01_task-rest_run-1_desc-confounds_timeseries.tsv",
-        "sub-010_task-rest_run-2_bold.nii.gz",
-        "sub-010_task-rest_run-2_events.tsv",
-        "sub-010_task-rest_run-2_desc-confounds_timeseries.tsv",
-    ]:
-        (func_dir / path_suffix).touch()
+    (raw_func_dir / "sub-01_task-rest_run-1_events.tsv").touch()
+    (raw_func_dir / "sub-010_task-rest_run-2_events.tsv").touch()
 
-    (func_dir / "sub-01_task-rest_run-1_bold.json").write_text(json.dumps({"RepetitionTime": 2.0}), encoding="utf-8")
-    (func_dir / "sub-010_task-rest_run-2_bold.json").write_text(json.dumps({"RepetitionTime": 2.0}), encoding="utf-8")
+    for subject, run in (("01", "1"), ("010", "2")):
+        derivative_func_dir = derivative_root / f"sub-{subject}" / "func"
+        derivative_func_dir.mkdir(parents=True, exist_ok=True)
+        (derivative_func_dir / f"sub-{subject}_task-rest_run-{run}_desc-preproc_bold.nii.gz").touch()
+        (derivative_func_dir / f"sub-{subject}_task-rest_run-{run}_desc-confounds_timeseries.tsv").touch()
 
-    dataset = DatasetIndex(study_root)
+    config = {"study_root": str(study_root), "bids_root": str(study_root), "analysis": {"derivative_dataset": "custom-preproc"}}
+
+    dataset = DatasetIndex.from_config(config)
     run_infos = [run.as_dict() for run in dataset.get_task_runs(subject="01", task="rest")]
 
     assert len(run_infos) == 1

@@ -58,6 +58,7 @@
     "exclusions_file": "derivatives/hbicproc/exclusions.json"
   },
   "analysis": {
+    "derivative_dataset": "fmriprep",
     "subject": {
       "activation": {
         "enabled": false,
