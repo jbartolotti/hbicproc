@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from pipeline.processing.analysis.derivatives import DerivativePathBuilder
 from pipeline.processing.behavior.config import TaskConfig
 from pipeline.processing.behavior.models import EventTable
 from pipeline.processing.behavior.parsers.registry import ParserRegistry
@@ -117,3 +118,19 @@ def test_registry_and_validator() -> None:
         {"onset": 1.0, "duration": 1.0, "trial_type": "congruent"},
     ])
     validate_event_table(table)
+
+
+def test_derivative_builder_normalizes_bids_entities() -> None:
+    path = DerivativePathBuilder.build(
+        Path("derivatives"),
+        subject="sub_001",
+        session="ses_baseline",
+        task="task_rest",
+        run="run_2",
+        desc="condition_a",
+        stat="effect",
+        suffix=".nii.gz",
+    )
+
+    expected = Path("derivatives") / "sub-001_ses-baseline_task-rest_run-2_desc-condition-a_stat-effect.nii.gz"
+    assert path == expected

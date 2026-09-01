@@ -15,8 +15,13 @@ class DerivativePathBuilder:
         if not text:
             return None
 
-        if prefix and text.startswith(prefix):
-            text = text[len(prefix) :]
+        prefix_variants = []
+        if prefix:
+            prefix_variants.extend([prefix, prefix.replace("-", "_")])
+        for candidate_prefix in prefix_variants:
+            if text.lower().startswith(candidate_prefix.lower()):
+                text = text[len(candidate_prefix) :]
+                break
 
         normalized = text.replace("_", "-")
         if not normalized:

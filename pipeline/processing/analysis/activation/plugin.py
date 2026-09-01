@@ -5,6 +5,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import matplotlib
+
+matplotlib.use("Agg")
+
 import pandas as pd
 
 from ..base import AnalysisPlugin, AnalysisResult
@@ -13,15 +17,33 @@ from ..derivatives import DerivativePathBuilder
 logger = logging.getLogger(__name__)
 
 
+def _normalize_entity_value(value: Any, *, entity_name: str) -> str:
+    if value is None:
+        return ""
+
+    text = str(value).strip()
+    if not text:
+        return ""
+
+    for candidate_prefix in (f"{entity_name}-", f"{entity_name}_", entity_name):
+        if text.lower().startswith(candidate_prefix.lower()):
+            text = text[len(candidate_prefix) :]
+            break
+
+    return text.replace("_", "-")
+
+
 def _strip_entity_prefix(value: Any, prefix: str) -> str:
     if value is None:
         return ""
     text = str(value).strip()
     if not text:
         return ""
-    if text.startswith(prefix):
-        return text[len(prefix) :]
-    return text
+    for candidate_prefix in (prefix, prefix.replace("-", "_")):
+        if text.lower().startswith(candidate_prefix.lower()):
+            text = text[len(candidate_prefix) :]
+            break
+    return text.replace("_", "-")
 
 
 def _parse_bids_entities(path: Path) -> dict[str, str]:
@@ -33,11 +55,13 @@ def _parse_bids_entities(path: Path) -> dict[str, str]:
 
     entities: dict[str, str] = {}
     for token in stem.split("_"):
-        if "-" not in token:
+        if "-" not in token and "_" not in token:
             continue
-        key, _, value = token.partition("-")
+        key, _, raw_value = token.partition("-")
+        if not raw_value and "_" in token:
+            key, _, raw_value = token.partition("_")
         if key in {"sub", "ses", "task", "run", "desc", "stat"}:
-            entities[key] = value
+            entities[key] = _normalize_entity_value(raw_value or token, entity_name=key)
     return entities
 
 
@@ -71,6 +95,9 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         rerun: bool = False,
         plugin_config: dict[str, Any] | None = None,
     ) -> AnalysisResult:
+        normalized_subject = _normalize_entity_value(subject, entity_name="sub")
+        logger.info("Activation analysis requested for subject=%s", normalized_subject)
+
         plugin_cfg = plugin_config or self.get_config(config)
         if not isinstance(plugin_cfg, dict):
             plugin_cfg = {}
@@ -86,10 +113,10 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
                 skipped=True,
                 plugin=self.name,
                 message=(
-                    f"Activation analysis for subject {subject} is not configured with any tasks. "
+                    f"Activation analysis for subject {normalized_subject} is not configured with any tasks. "
                     "Set analysis.subject.activation.tasks to the tasks to analyze."
                 ),
-                details={"subject": subject, "tasks": tasks},
+                details={"subject": normalized_subject, "tasks": tasks},
             )
 
         try:
@@ -99,19 +126,20 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
                 success=False,
                 plugin=self.name,
                 message=str(exc),
-                details={"subject": subject, "tasks": tasks, "contrasts": plugin_cfg.get("contrasts")},
+                details={"subject": normalized_subject, "tasks": tasks, "contrasts": plugin_cfg.get("contrasts")},
             )
 
         results: list[AnalysisResult] = []
         for task in tasks:
-            results.extend(self._run_task(subject, task, config, plugin_cfg, dry_run=dry_run))
+            logger.info("Starting activation task for subject=%s task=%s", normalized_subject, task)
+            results.extend(self._run_task(normalized_subject, task, config, plugin_cfg, dry_run=dry_run))
 
         if not results:
             return AnalysisResult(
                 success=False,
                 plugin=self.name,
-                message=f"No activation analysis runs were found for subject {subject}.",
-                details={"subject": subject, "tasks": tasks},
+                message=f"No activation analysis runs were found for subject {normalized_subject}.",
+                details={"subject": normalized_subject, "tasks": tasks},
             )
 
         success = all(result.success for result in results)
@@ -121,7 +149,7 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
             plugin=self.name,
             message=message,
             details={
-                "subject": subject,
+                "subject": normalized_subject,
                 "tasks": tasks,
                 "results": [result.details for result in results],
             },
@@ -235,24 +263,25 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
                     seen.add(key)
 
         run_infos: list[dict[str, Any]] = []
+        normalized_subject = _normalize_entity_value(subject, entity_name="sub")
         for bold_path in bold_files:
             bold_entities = _parse_bids_entities(bold_path)
-            session_label = bold_entities.get("ses")
-            run_label = bold_entities.get("run")
+            session_label = _normalize_entity_value(bold_entities.get("ses"), entity_name="ses")
+            run_label = _normalize_entity_value(bold_entities.get("run"), entity_name="run")
             matching_events = [
-                event_path for event_path in event_files if self._matches_run_metadata(event_path, subject, task, session=session_label, run=run_label)
+                event_path for event_path in event_files if self._matches_run_metadata(event_path, normalized_subject, task, session=session_label, run=run_label)
             ]
             matching_confounds = [
                 confounds_path
                 for confounds_path in confounds_files
-                if self._matches_run_metadata(confounds_path, subject, task, session=session_label, run=run_label)
+                if self._matches_run_metadata(confounds_path, normalized_subject, task, session=session_label, run=run_label)
             ]
             if not matching_events or not matching_confounds:
                 continue
 
             run_infos.append(
                 {
-                    "subject": subject,
+                    "subject": normalized_subject,
                     "task": task,
                     "session": session_label,
                     "run": run_label,
@@ -276,10 +305,20 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
     ) -> AnalysisResult:
         from nilearn.glm.first_level import FirstLevelModel
 
+        normalized_subject = _normalize_entity_value(subject, entity_name="sub")
+        session_label = _normalize_entity_value(run_info.get("session"), entity_name="ses")
+        run_label = _normalize_entity_value(run_info.get("run"), entity_name="run") or "1"
+
+        logger.info(
+            "Running activation analysis for subject=%s session=%s task=%s run=%s",
+            normalized_subject,
+            session_label or "unspecified",
+            task,
+            run_label,
+        )
+
         output_root = self._resolve_output_root(config, plugin_cfg)
-        session_label = run_info.get("session")
-        run_label = run_info.get("run") or "1"
-        output_dir = output_root / subject
+        output_dir = output_root / normalized_subject
         if session_label:
             output_dir = output_dir / session_label
         output_dir = output_dir / "func"
@@ -291,11 +330,11 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
                 skipped=True,
                 plugin=self.name,
                 message=(
-                    f"Dry run: would run activation analysis for subject {subject} task {task} "
+                    f"Dry run: would run activation analysis for subject {normalized_subject} task {task} "
                     f"with session {session_label or 'unspecified'} run {run_label} in {output_dir}."
                 ),
                 details={
-                    "subject": subject,
+                    "subject": normalized_subject,
                     "task": task,
                     "session": session_label,
                     "run": run_label,
@@ -305,7 +344,7 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
 
         events = pd.read_csv(run_info["events_path"], sep="\t")
         if events.empty:
-            raise ValueError(f"Event file for {subject} task {task} is empty: {run_info['events_path']}")
+            raise ValueError(f"Event file for {normalized_subject} task {task} is empty: {run_info['events_path']}")
 
         events = events.copy()
         if "trial_type" in events.columns:
@@ -315,6 +354,14 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         confounds = self._prepare_confounds(confounds, plugin_cfg)
 
         tr = self._read_repetition_time(run_info["bold_path"])
+        logger.info(
+            "Fitting activation model for subject=%s session=%s task=%s run=%s TR=%s",
+            normalized_subject,
+            session_label or "unspecified",
+            task,
+            run_label,
+            tr,
+        )
         glm = FirstLevelModel(
             t_r=float(tr),
             hrf_model=str(plugin_cfg.get("hrf_model", "spm")),
@@ -325,41 +372,38 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         )
         glm.fit(run_info["bold_path"], events=events, confounds=confounds if not confounds.empty else None)
 
+        logger.info(
+            "Generating activation contrasts for subject=%s session=%s task=%s run=%s",
+            normalized_subject,
+            session_label or "unspecified",
+            task,
+            run_label,
+        )
         contrast_map = self._build_contrast_map(plugin_cfg)
         design_matrix = glm.design_matrices_[0]
-        report_path = self._output_path(
-            output_dir,
-            subject=subject,
-            session=session_label,
-            task=task,
-            run=run_label,
-            desc="report",
-            suffix=".html",
-        )
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report = glm.generate_report(contrasts=contrast_map)
-        report.save_as_html(report_path)
 
         design_matrix_path = self._output_path(
             output_dir,
-            subject=subject,
+            subject=normalized_subject,
             session=session_label,
             task=task,
             run=run_label,
             desc="design_matrix",
             suffix=".csv",
         )
+        logger.info("Saving design matrix CSV for subject=%s session=%s task=%s run=%s", normalized_subject, session_label or "unspecified", task, run_label)
         design_matrix.to_csv(design_matrix_path, index=False)
 
         design_png_path = self._output_path(
             output_dir,
-            subject=subject,
+            subject=normalized_subject,
             session=session_label,
             task=task,
             run=run_label,
             desc="design_matrix",
             suffix=".png",
         )
+        logger.info("Saving design matrix PNG for subject=%s session=%s task=%s run=%s", normalized_subject, session_label or "unspecified", task, run_label)
         self._save_design_png(design_matrix, design_png_path)
 
         fd_threshold = float(
@@ -368,30 +412,38 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         motion_qc = self._summarize_motion_qc(confounds, fd_threshold)
         motion_qc_path = self._output_path(
             output_dir,
-            subject=subject,
+            subject=normalized_subject,
             session=session_label,
             task=task,
             run=run_label,
             desc="motion_qc",
             suffix=".json",
         )
+        logger.info("Saving motion QC for subject=%s session=%s task=%s run=%s", normalized_subject, session_label or "unspecified", task, run_label)
         motion_qc_path.write_text(json.dumps(motion_qc, indent=2), encoding="utf-8")
 
         generated_paths = [
-            str(report_path),
             str(design_matrix_path),
             str(design_png_path),
             str(motion_qc_path),
         ]
 
         for contrast_name, expression in contrast_map.items():
+            logger.info(
+                "Saving contrast outputs for subject=%s session=%s task=%s run=%s contrast=%s",
+                normalized_subject,
+                session_label or "unspecified",
+                task,
+                run_label,
+                contrast_name,
+            )
             effect_map = glm.compute_contrast(expression, output_type="effect_size")
             z_map = glm.compute_contrast(expression, output_type="z_score")
             variance_map = glm.compute_contrast(expression, output_type="effect_variance")
 
             effect_path = self._output_path(
                 output_dir,
-                subject=subject,
+                subject=normalized_subject,
                 session=session_label,
                 task=task,
                 run=run_label,
@@ -401,7 +453,7 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
             )
             z_path = self._output_path(
                 output_dir,
-                subject=subject,
+                subject=normalized_subject,
                 session=session_label,
                 task=task,
                 run=run_label,
@@ -411,7 +463,7 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
             )
             variance_path = self._output_path(
                 output_dir,
-                subject=subject,
+                subject=normalized_subject,
                 session=session_label,
                 task=task,
                 run=run_label,
@@ -426,12 +478,20 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
 
         for condition in self._infer_conditions(events, plugin_cfg):
             try:
+                logger.info(
+                    "Saving condition effect map for subject=%s session=%s task=%s run=%s condition=%s",
+                    normalized_subject,
+                    session_label or "unspecified",
+                    task,
+                    run_label,
+                    condition,
+                )
                 effect_map = glm.compute_contrast(condition, output_type="effect_size")
             except Exception:
                 continue
             effect_path = self._output_path(
                 output_dir,
-                subject=subject,
+                subject=normalized_subject,
                 session=session_label,
                 task=task,
                 run=run_label,
@@ -448,20 +508,21 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         if residuals is None:
             logger.warning(
                 "Nilearn did not expose residual images for subject %s task %s; continuing without residual outputs.",
-                subject,
+                normalized_subject,
                 task,
             )
         else:
             residual_img = residuals[0] if isinstance(residuals, (list, tuple)) and residuals else residuals
             residual_path = self._output_path(
                 output_dir,
-                subject=subject,
+                subject=normalized_subject,
                 session=session_label,
                 task=task,
                 run=run_label,
                 desc="residual",
                 suffix=".nii.gz",
             )
+            logger.info("Saving residual image for subject=%s session=%s task=%s run=%s", normalized_subject, session_label or "unspecified", task, run_label)
             residual_img.to_filename(residual_path)
             generated_paths.append(str(residual_path))
 
@@ -469,30 +530,63 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         if mask_img is not None:
             mask_path = self._output_path(
                 output_dir,
-                subject=subject,
+                subject=normalized_subject,
                 session=session_label,
                 task=task,
                 run=run_label,
                 desc="mask",
                 suffix=".nii.gz",
             )
+            logger.info("Saving mask image for subject=%s session=%s task=%s run=%s", normalized_subject, session_label or "unspecified", task, run_label)
             mask_img.to_filename(mask_path)
             generated_paths.append(str(mask_path))
 
+        report_path = self._output_path(
+            output_dir,
+            subject=normalized_subject,
+            session=session_label,
+            task=task,
+            run=run_label,
+            desc="report",
+            suffix=".html",
+        )
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            logger.info(
+                "Generating Nilearn HTML report for subject=%s session=%s task=%s run=%s",
+                normalized_subject,
+                session_label or "unspecified",
+                task,
+                run_label,
+            )
+            report = glm.generate_report(contrasts=contrast_map)
+            report.save_as_html(report_path)
+            generated_paths.append(str(report_path))
+        except Exception:
+            logger.warning(
+                "Failed to generate HTML report for subject=%s session=%s task=%s run=%s; scientific outputs were preserved.",
+                normalized_subject,
+                session_label or "unspecified",
+                task,
+                run_label,
+                exc_info=True,
+            )
+
         summary = {
-            "subject": subject,
+            "subject": normalized_subject,
             "task": task,
             "session": session_label,
             "run": run_label,
             "output_dir": str(output_dir),
             "motion_qc": motion_qc,
             "generated_outputs": generated_paths,
+            "report_generated": str(report_path) in generated_paths,
         }
         return AnalysisResult(
             success=True,
             plugin=self.name,
             message=(
-                f"Activation analysis complete for subject {subject} task {task} "
+                f"Activation analysis complete for subject {normalized_subject} task {task} "
                 f"session {session_label or 'unspecified'} run {run_label}."
             ),
             details=summary,
