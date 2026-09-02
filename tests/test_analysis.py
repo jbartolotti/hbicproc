@@ -59,6 +59,36 @@ def test_analysis_stage_ignores_subject_level_completion_state(monkeypatch: pyte
     assert result.skipped is True
 
 
+def test_analysis_stage_reuses_dataset_index_across_subjects(monkeypatch: pytest.MonkeyPatch) -> None:
+    created: list[object] = []
+    received: list[object] = []
+
+    class FakeDatasetIndex:
+        pass
+
+    def fake_from_config(config: dict[str, object]) -> FakeDatasetIndex:
+        _ = config
+        index = FakeDatasetIndex()
+        created.append(index)
+        return index
+
+    def fake_analysis_run(*args: object, **kwargs: object) -> dict[str, object]:
+        _ = args
+        received.append(kwargs["dataset_index"])
+        return {"success": True, "skipped": True, "message": "run invoked", "details": {}}
+
+    monkeypatch.setattr("pipeline.stages.analysis.DatasetIndex.from_config", fake_from_config)
+    monkeypatch.setattr("pipeline.stages.analysis.analysis_run", fake_analysis_run)
+
+    config = {"analysis": {"subject": {"activation": {"enabled": True}}}}
+    stage = AnalysisStage()
+    stage.execute("001", config, {})
+    stage.execute("002", config, {})
+
+    assert len(created) == 1
+    assert received == [created[0], created[0]]
+
+
 def test_analysis_plugin_load_failure_is_logged_and_raised(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     registry = AnalysisPluginRegistry()
 
@@ -331,8 +361,11 @@ def test_dataset_index_logs_discovery(caplog: pytest.LogCaptureFixture, tmp_path
     with caplog.at_level(logging.INFO):
         dataset = DatasetIndex(bids_root)
         runs = dataset.get_task_runs(subject="001", task="rest")
+        repeated_runs = dataset.get_task_runs(subject="sub-001", task="task-rest")
 
     assert len(runs) == 1
+    assert repeated_runs == runs
+    assert "Reusing cached dataset discovery" in caplog.text
     assert "Dataset discovery requested" in caplog.text
     assert "Discovered BOLD files" in caplog.text
     assert "Resolved AnalysisRun objects" in caplog.text

@@ -5,6 +5,7 @@ from importlib.metadata import entry_points
 from typing import Any, Type
 
 from .base import AnalysisPlugin, AnalysisResult
+from .dataset import DatasetIndex
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ class AnalysisPluginRegistry:
         dry_run: bool = False,
         rerun: bool = False,
         plugin_name: str | None = None,
+        dataset_index: DatasetIndex | None = None,
     ) -> list[AnalysisResult]:
         self.discover()
 
@@ -84,7 +86,18 @@ class AnalysisPluginRegistry:
             plugin_cls = self.get(name)
             if plugin_cls is None:
                 continue
-            result = plugin_cls().execute(subject, config, dry_run=dry_run, rerun=rerun)
+            plugin = plugin_cls()
+            plugin_config = plugin.get_config(config)
+            if dataset_index is None and (rerun or plugin_config.get("enabled", False)):
+                dataset_index = DatasetIndex.from_config(config)
+            result = plugin.execute(
+                subject,
+                config,
+                dry_run=dry_run,
+                rerun=rerun,
+                plugin_config=plugin_config,
+                dataset_index=dataset_index,
+            )
             results.append(result)
 
         if not results:

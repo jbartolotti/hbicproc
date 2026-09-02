@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+from .dataset import DatasetIndex
+
 
 @dataclass
 class AnalysisResult:
@@ -37,6 +39,7 @@ class AnalysisPlugin(ABC):
         dry_run: bool = False,
         rerun: bool = False,
         plugin_config: dict[str, Any] | None = None,
+        dataset_index: DatasetIndex | None = None,
     ) -> AnalysisResult:
         plugin_cfg = plugin_config or self.get_config(config)
         enabled = plugin_cfg.get("enabled", False)
@@ -49,7 +52,14 @@ class AnalysisPlugin(ABC):
                 details={"enabled": False},
             )
 
-        return self.run(subject, config, dry_run=dry_run, rerun=rerun, plugin_config=plugin_cfg)
+        return self.run(
+            subject,
+            config,
+            dry_run=dry_run,
+            rerun=rerun,
+            plugin_config=plugin_cfg,
+            dataset_index=dataset_index,
+        )
 
     @abstractmethod
     def run(
@@ -60,5 +70,6 @@ class AnalysisPlugin(ABC):
         dry_run: bool = False,
         rerun: bool = False,
         plugin_config: dict[str, Any] | None = None,
+        dataset_index: DatasetIndex | None = None,
     ) -> AnalysisResult:
         raise NotImplementedError("Analysis plugin implementations must override run().")

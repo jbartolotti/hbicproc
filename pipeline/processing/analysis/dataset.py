@@ -86,6 +86,10 @@ class DatasetIndex:
 
         self.layout: BIDSLayout | None = None
         self.derivative_layout: BIDSLayout | None = None
+        self._task_runs_cache: dict[
+            tuple[str | None, str | None, str | None, str | None],
+            tuple[AnalysisRun, ...],
+        ] = {}
         if self.bids_root.exists():
             try:
                 self.layout = BIDSLayout(
@@ -126,6 +130,23 @@ class DatasetIndex:
         session: str | None = None,
         run: str | None = None,
     ) -> list[AnalysisRun]:
+        normalized_subject = _normalize_entity_text(subject, prefix="sub") if subject is not None else None
+        normalized_task = _normalize_entity_text(task, prefix="task") if task is not None else None
+        normalized_session = _normalize_entity_text(session, prefix="ses") if session is not None else None
+        normalized_run = _normalize_entity_text(run, prefix="run") if run is not None else None
+        cache_key = (normalized_subject, normalized_task, normalized_session, normalized_run)
+        cached_runs = self._task_runs_cache.get(cache_key)
+        if cached_runs is not None:
+            logger.info(
+                "Reusing cached dataset discovery: subject=%s task=%s session=%s run=%s runs=%d",
+                normalized_subject,
+                normalized_task,
+                normalized_session,
+                normalized_run,
+                len(cached_runs),
+            )
+            return list(cached_runs)
+
         if self.layout is None or self.derivative_layout is None:
             logger.info(
                 "Dataset discovery skipped for subject=%s task=%s: raw_layout=%s derivative_layout=%s derivative_dataset=%s derivative_root=%s",
@@ -136,12 +157,8 @@ class DatasetIndex:
                 self.derivative_dataset,
                 self.derivative_root,
             )
+            self._task_runs_cache[cache_key] = ()
             return []
-
-        normalized_subject = _normalize_entity_text(subject, prefix="sub") if subject is not None else None
-        normalized_task = _normalize_entity_text(task, prefix="task") if task is not None else None
-        normalized_session = _normalize_entity_text(session, prefix="ses") if session is not None else None
-        normalized_run = _normalize_entity_text(run, prefix="run") if run is not None else None
 
         logger.info(
             "Dataset discovery requested: subject=%s task=%s session=%s run=%s (normalized: subject=%s task=%s session=%s run=%s)",
@@ -274,7 +291,9 @@ class DatasetIndex:
             runs.append(resolved_run)
 
         logger.info("Resolved AnalysisRun objects for subject=%s task=%s: %s", normalized_subject, normalized_task, [run.as_dict() for run in runs])
-        return sorted(runs, key=lambda item: (item.session or "", item.run or ""))
+        resolved_runs = tuple(sorted(runs, key=lambda item: (item.session or "", item.run or "")))
+        self._task_runs_cache[cache_key] = resolved_runs
+        return list(resolved_runs)
 
     def _query(self, layout: BIDSLayout | None, **filters: Any) -> list[Any]:
         if layout is None:

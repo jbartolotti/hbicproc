@@ -64,6 +64,7 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         dry_run: bool = False,
         rerun: bool = False,
         plugin_config: dict[str, Any] | None = None,
+        dataset_index: DatasetIndex | None = None,
     ) -> AnalysisResult:
         normalized_subject = _normalize_entity_value(subject, entity_name="sub")
         logger.info("Activation analysis requested for subject=%s", normalized_subject)
@@ -99,6 +100,9 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
                 details={"subject": normalized_subject, "tasks": tasks, "contrasts": plugin_cfg.get("contrasts")},
             )
 
+        if dataset_index is None:
+            dataset_index = DatasetIndex.from_config(config)
+
         results: list[AnalysisResult] = []
         for task in tasks:
             logger.info("Starting activation task for subject=%s task=%s", normalized_subject, task)
@@ -110,6 +114,7 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
                     plugin_cfg,
                     dry_run=dry_run,
                     rerun=rerun,
+                    dataset_index=dataset_index,
                 )
             )
 
@@ -160,8 +165,11 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         *,
         dry_run: bool = False,
         rerun: bool = False,
+        dataset_index: DatasetIndex | None = None,
     ) -> list[AnalysisResult]:
-        dataset = DatasetIndex.from_config(config)
+        if dataset_index is None:  # pragma: no cover - _run_task is called from run()
+            raise RuntimeError("Activation analysis requires a shared DatasetIndex.")
+        dataset = dataset_index
         run_infos = dataset.get_task_runs(subject=subject, task=task)
         logger.info(
             "Activation discovery complete: subject=%s task=%s runs=%d raw_run_objects=%s",
@@ -237,7 +245,6 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
             subject=normalized_subject,
             session=session_label,
         ) / "func"
-        output_dir.mkdir(parents=True, exist_ok=True)
         logger.info(
             "Resolved activation output directory for subject=%s session=%s task=%s run=%s: %s",
             normalized_subject,
@@ -248,6 +255,7 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         )
 
         if dry_run:
+            output_dir.mkdir(parents=True, exist_ok=True)
             return AnalysisResult(
                 success=True,
                 skipped=True,
@@ -305,6 +313,8 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
                     "expected_outputs": [str(path) for path in inventory.required_outputs()],
                 },
             )
+
+        output_dir.mkdir(parents=True, exist_ok=True)
 
         if rerun:
             logger.info(
