@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from importlib import import_module
+import logging
 from importlib.metadata import entry_points
 from typing import Any, Type
 
 from .base import AnalysisPlugin, AnalysisResult
+
+logger = logging.getLogger(__name__)
 
 
 class AnalysisPluginRegistry:
@@ -35,8 +37,13 @@ class AnalysisPluginRegistry:
             from .activation.plugin import ActivationAnalysisPlugin
 
             self.register(ActivationAnalysisPlugin)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.exception("Failed to load built-in analysis plugin 'activation'.")
+            raise RuntimeError(
+                "Failed to load built-in analysis plugin 'activation'. "
+                "Verify that the installed package includes the pipeline processing analysis modules "
+                "and that its dependencies are available."
+            ) from exc
 
     def _load_entry_point_plugins(self) -> None:
         try:
@@ -52,6 +59,10 @@ class AnalysisPluginRegistry:
             try:
                 plugin_cls = entry_point.load()
             except Exception:
+                logger.exception(
+                    "Failed to load analysis plugin entry point '%s'.",
+                    getattr(entry_point, "name", entry_point),
+                )
                 continue
             if isinstance(plugin_cls, type):
                 self.register(plugin_cls)

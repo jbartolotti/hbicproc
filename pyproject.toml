@@ -5,6 +5,15 @@ description = "Minimal fMRI preprocessing workflow orchestrator."
 requires-python = ">=3.8"
 dependencies = ["questionary>=1.0", "pyxnat>=1.6", "nibabel", "pandas", "bidskit", "bids", "pybids>=0.22.0", "nilearn"]
 
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pipeline*"]
+exclude = ["tests*", "work*"]
+
 [project.scripts]
 hbicproc = "pipeline.cli:main"
 pipeline = "pipeline.cli:main"

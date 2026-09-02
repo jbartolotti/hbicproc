@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from .registry import get_analysis_registry
+
+logger = logging.getLogger(__name__)
 
 
 def _enabled_plugin_names(config: dict[str, Any]) -> list[str]:
@@ -19,7 +22,16 @@ def _enabled_plugin_names(config: dict[str, Any]) -> list[str]:
 
 
 def run(subject: str, config: dict[str, Any], dry_run: bool = False, rerun: bool = False, plugin_name: str | None = None) -> dict[str, Any]:
-    registry = get_analysis_registry()
+    try:
+        registry = get_analysis_registry()
+    except Exception as exc:
+        logger.exception("Analysis plugin discovery failed for subject=%s.", subject)
+        return {
+            "success": False,
+            "skipped": False,
+            "message": f"Analysis plugin loading failed for subject {subject}: {exc}",
+            "details": {"subject": subject, "error": str(exc)},
+        }
     if plugin_name:
         requested = [plugin_name]
     else:
@@ -42,9 +54,12 @@ def run(subject: str, config: dict[str, Any], dry_run: bool = False, rerun: bool
 
     if not results:
         return {
-            "success": True,
-            "skipped": True,
-            "message": f"No analysis plugins were available for subject {subject}.",
+            "success": False,
+            "skipped": False,
+            "message": (
+                f"No analysis plugins were available for subject {subject}. "
+                "Plugin discovery completed without registering any plugins."
+            ),
             "details": {"subject": subject, "plugins": requested},
         }
 

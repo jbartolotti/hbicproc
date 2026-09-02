@@ -10,6 +10,7 @@ from pipeline.config import load_default_config
 from pipeline.processing.analysis import AnalysisPluginRegistry, AnalysisRun, DatasetIndex
 from pipeline.processing.analysis.activation.plugin import ActivationAnalysisPlugin
 from pipeline.processing.analysis.derivatives import DerivativePathBuilder
+from pipeline.processing.analysis import service as analysis_service
 from pipeline.stages import STAGE_CLASSES
 from pipeline.stages.analysis import AnalysisStage
 
@@ -44,6 +45,7 @@ def test_analysis_stage_ignores_subject_level_completion_state(monkeypatch: pyte
 
     def fake_analysis_run(*args: object, **kwargs: object) -> dict[str, object]:
         nonlocal called
+        _ = (args, kwargs)
         called = True
         return {"success": True, "skipped": True, "message": "run invoked", "details": {}}
 
@@ -55,6 +57,36 @@ def test_analysis_stage_ignores_subject_level_completion_state(monkeypatch: pyte
     assert stage.state_key is None
     assert called is True
     assert result.skipped is True
+
+
+def test_analysis_plugin_load_failure_is_logged_and_raised(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = AnalysisPluginRegistry()
+
+    def fail_register(plugin_cls: type) -> type:
+        _ = plugin_cls
+        raise ImportError("analysis outputs module is unavailable")
+
+    monkeypatch.setattr(registry, "register", fail_register)
+
+    with caplog.at_level(logging.ERROR):
+        with pytest.raises(RuntimeError, match="Failed to load built-in analysis plugin"):
+            registry._load_builtin_plugins()
+
+    assert "analysis outputs module is unavailable" in caplog.text
+
+
+def test_analysis_service_reports_registry_loading_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_discovery() -> AnalysisPluginRegistry:
+        raise RuntimeError("missing analysis outputs module")
+
+    monkeypatch.setattr(analysis_service, "get_analysis_registry", fail_discovery)
+
+    result = analysis_service.run("001", {})
+
+    assert result["success"] is False
+    assert result["skipped"] is False
+    assert "plugin loading failed" in result["message"].lower()
+    assert "missing analysis outputs module" in result["message"]
 
 
 def test_activation_plugin_reads_repetition_time_from_bids_sidecar(tmp_path: Path) -> None:
