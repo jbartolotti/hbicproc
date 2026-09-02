@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pipeline.processing.analysis import AnalysisOutputInventory, AnalysisRun
 from pipeline.processing.analysis.dataset import DatasetIndex
 
 
@@ -79,3 +80,22 @@ def test_dataset_index_resolves_all_sessions_from_configured_derivative(tmp_path
         ("008", "BL", "nback"),
         ("008", "w12", "nback"),
     ]
+
+
+def test_analysis_output_inventory_requires_all_configured_contrasts(tmp_path: Path) -> None:
+    analysis_run = AnalysisRun(subject="008", session="BL", task="nback", run="1")
+    inventory = AnalysisOutputInventory.for_run(
+        tmp_path / "func",
+        analysis_run,
+        ("2back_gt_baseline", "1back_gt_baseline", "2back_gt_1back"),
+    )
+
+    required_outputs = inventory.required_outputs()
+    assert len(required_outputs) == 10
+    assert len(inventory.missing_outputs()) == 10
+
+    for path in required_outputs:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+
+    assert inventory.is_complete() is True

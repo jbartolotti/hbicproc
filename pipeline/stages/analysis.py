@@ -4,7 +4,8 @@ from ..processing.analysis.service import run as analysis_run
 
 class AnalysisStage(BaseStage):
     name = "analysis"
-    state_key = "analysis_complete"
+    # Analysis completion is determined per run from its core output products.
+    state_key = None
 
     def run(self, subject, config, state, dry_run=False, rerun=False, plugin_name=None):
         result = analysis_run(subject, config, dry_run=dry_run, rerun=rerun, plugin_name=plugin_name)

@@ -12,8 +12,9 @@ matplotlib.use("Agg")
 import pandas as pd
 
 from ..base import AnalysisPlugin, AnalysisResult
-from ..dataset import DatasetIndex
+from ..dataset import AnalysisRun, DatasetIndex
 from ..derivatives import DerivativePathBuilder
+from ..outputs import AnalysisOutputInventory
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,16 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         results: list[AnalysisResult] = []
         for task in tasks:
             logger.info("Starting activation task for subject=%s task=%s", normalized_subject, task)
-            results.extend(self._run_task(normalized_subject, task, config, plugin_cfg, dry_run=dry_run))
+            results.extend(
+                self._run_task(
+                    normalized_subject,
+                    task,
+                    config,
+                    plugin_cfg,
+                    dry_run=dry_run,
+                    rerun=rerun,
+                )
+            )
 
         if not results:
             return AnalysisResult(
@@ -112,10 +122,12 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
             )
 
         success = all(result.success for result in results)
+        skipped = all(result.skipped for result in results)
         message = "\n".join(result.message for result in results)
         return AnalysisResult(
             success=success,
             plugin=self.name,
+            skipped=skipped,
             message=message,
             details={
                 "subject": normalized_subject,
@@ -147,15 +159,16 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         plugin_cfg: dict[str, Any],
         *,
         dry_run: bool = False,
+        rerun: bool = False,
     ) -> list[AnalysisResult]:
         dataset = DatasetIndex.from_config(config)
-        run_infos = [run.as_dict() for run in dataset.get_task_runs(subject=subject, task=task)]
+        run_infos = dataset.get_task_runs(subject=subject, task=task)
         logger.info(
             "Activation discovery complete: subject=%s task=%s runs=%d raw_run_objects=%s",
             subject,
             task,
             len(run_infos),
-            run_infos,
+            [run.as_dict() for run in run_infos],
         )
         if not run_infos:
             return [
@@ -173,14 +186,22 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         results: list[AnalysisResult] = []
         for run_info in run_infos:
             try:
-                result = self._run_single_run(subject, task, run_info, config, plugin_cfg, dry_run=dry_run)
+                result = self._run_single_run(
+                    subject,
+                    task,
+                    run_info,
+                    config,
+                    plugin_cfg,
+                    dry_run=dry_run,
+                    rerun=rerun,
+                )
             except Exception as exc:  # pragma: no cover - runtime failure path; surfaced to caller
                 results.append(
                     AnalysisResult(
                         success=False,
                         plugin=self.name,
                         message=f"Activation analysis failed for {subject} task {task}: {exc}",
-                        details={"subject": subject, "task": task, "run": run_info.get("run"), "error": str(exc)},
+                        details={"subject": subject, "task": task, "run": run_info.run, "error": str(exc)},
                     )
                 )
             else:
@@ -191,17 +212,16 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         self,
         subject: str,
         task: str,
-        run_info: dict[str, Any],
+        run_info: AnalysisRun,
         config: dict[str, Any],
         plugin_cfg: dict[str, Any],
         *,
         dry_run: bool = False,
+        rerun: bool = False,
     ) -> AnalysisResult:
-        from nilearn.glm.first_level import FirstLevelModel
-
         normalized_subject = _normalize_entity_value(subject, entity_name="sub")
-        session_label = _normalize_entity_value(run_info.get("session"), entity_name="ses")
-        run_label = _normalize_entity_value(run_info.get("run"), entity_name="run") or "1"
+        session_label = _normalize_entity_value(run_info.session, entity_name="ses")
+        run_label = _normalize_entity_value(run_info.run, entity_name="run") or "1"
 
         logger.info(
             "Running activation analysis for subject=%s session=%s task=%s run=%s",
@@ -245,18 +265,80 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
                 },
             )
 
-        events = pd.read_csv(run_info["events_path"], sep="\t")
+        contrast_map = self._build_contrast_map(plugin_cfg)
+        inventory = AnalysisOutputInventory.for_run(
+            output_dir,
+            AnalysisRun(
+                subject=normalized_subject,
+                task=task,
+                session=session_label,
+                run=run_label,
+                bold_path=run_info.bold_path,
+                events_path=run_info.events_path,
+                confounds_path=run_info.confounds_path,
+            ),
+            contrast_map,
+        )
+        missing_outputs = inventory.missing_outputs()
+        if not rerun and not missing_outputs:
+            logger.info(
+                "Skipping completed analysis: subject=%s session=%s task=%s run=%s",
+                normalized_subject,
+                session_label or "unspecified",
+                task,
+                run_label,
+            )
+            return AnalysisResult(
+                success=True,
+                skipped=True,
+                plugin=self.name,
+                message=(
+                    f"Skipping completed activation analysis for subject {normalized_subject} "
+                    f"session {session_label or 'unspecified'} task {task} run {run_label}."
+                ),
+                details={
+                    "subject": normalized_subject,
+                    "task": task,
+                    "session": session_label,
+                    "run": run_label,
+                    "output_based_skip": True,
+                    "expected_outputs": [str(path) for path in inventory.required_outputs()],
+                },
+            )
+
+        if rerun:
+            logger.info(
+                "Rerunning analysis despite existing outputs: subject=%s session=%s task=%s run=%s",
+                normalized_subject,
+                session_label or "unspecified",
+                task,
+                run_label,
+            )
+        else:
+            logger.info(
+                "Analysis incomplete; processing: subject=%s session=%s task=%s run=%s",
+                normalized_subject,
+                session_label or "unspecified",
+                task,
+                run_label,
+            )
+            for missing_path in missing_outputs:
+                logger.info("Missing output: %s", missing_path)
+
+        from nilearn.glm.first_level import FirstLevelModel
+
+        events = pd.read_csv(run_info.events_path, sep="\t")
         if events.empty:
-            raise ValueError(f"Event file for {normalized_subject} task {task} is empty: {run_info['events_path']}")
+            raise ValueError(f"Event file for {normalized_subject} task {task} is empty: {run_info.events_path}")
 
         events = events.copy()
         if "trial_type" in events.columns:
             events["trial_type"] = events["trial_type"].astype(str).str.strip().str.lower().str.replace(" ", "_")
 
-        confounds = pd.read_csv(run_info["confounds_path"], sep="\t")
+        confounds = pd.read_csv(run_info.confounds_path, sep="\t")
         confounds = self._prepare_confounds(confounds, plugin_cfg)
 
-        tr = self._read_repetition_time(run_info["bold_path"])
+        tr = self._read_repetition_time(run_info.bold_path)
         logger.info(
             "Fitting activation model for subject=%s session=%s task=%s run=%s TR=%s",
             normalized_subject,
@@ -273,7 +355,7 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
             smoothing_fwhm=float(plugin_cfg.get("smoothing_fwhm", 6.0)),
             minimize_memory=bool(plugin_cfg.get("minimize_memory", False)),
         )
-        glm.fit(run_info["bold_path"], events=events, confounds=confounds if not confounds.empty else None)
+        glm.fit(run_info.bold_path, events=events, confounds=confounds if not confounds.empty else None)
 
         design_matrix = glm.design_matrices_[0]
 
@@ -288,15 +370,6 @@ class ActivationAnalysisPlugin(AnalysisPlugin):
         )
         logger.info("Saving design matrix CSV for subject=%s session=%s task=%s run=%s", normalized_subject, session_label or "unspecified", task, run_label)
         design_matrix.to_csv(design_matrix_path, index=False)
-
-        logger.info(
-            "Generating activation contrasts for subject=%s session=%s task=%s run=%s",
-            normalized_subject,
-            session_label or "unspecified",
-            task,
-            run_label,
-        )
-        contrast_map = self._build_contrast_map(plugin_cfg)
 
         fd_threshold = float(
             plugin_cfg.get("fd_threshold", plugin_cfg.get("motion_qc", {}).get("fd_threshold", 0.5))

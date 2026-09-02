@@ -7,10 +7,11 @@ import pytest
 
 from pipeline.cli import _build_parser
 from pipeline.config import load_default_config
-from pipeline.processing.analysis import AnalysisPluginRegistry, DatasetIndex
+from pipeline.processing.analysis import AnalysisPluginRegistry, AnalysisRun, DatasetIndex
 from pipeline.processing.analysis.activation.plugin import ActivationAnalysisPlugin
 from pipeline.processing.analysis.derivatives import DerivativePathBuilder
 from pipeline.stages import STAGE_CLASSES
+from pipeline.stages.analysis import AnalysisStage
 
 
 def test_analysis_registry_registers_activation_plugin() -> None:
@@ -36,6 +37,24 @@ def test_analysis_files_are_in_processing_and_cli_command_exists() -> None:
 
     assert args.command == "analysis"
     assert args.subject == "sub-001"
+
+
+def test_analysis_stage_ignores_subject_level_completion_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = False
+
+    def fake_analysis_run(*args: object, **kwargs: object) -> dict[str, object]:
+        nonlocal called
+        called = True
+        return {"success": True, "skipped": True, "message": "run invoked", "details": {}}
+
+    monkeypatch.setattr("pipeline.stages.analysis.analysis_run", fake_analysis_run)
+
+    stage = AnalysisStage()
+    result = stage.execute("001", {}, {"analysis_complete": True})
+
+    assert stage.state_key is None
+    assert called is True
+    assert result.skipped is True
 
 
 def test_activation_plugin_reads_repetition_time_from_bids_sidecar(tmp_path: Path) -> None:
@@ -172,15 +191,15 @@ def test_activation_png_failure_does_not_prevent_scientific_outputs(
     result = plugin._run_single_run(
         "001",
         "rest",
-        {
-            "subject": "001",
-            "session": "BL",
-            "task": "rest",
-            "run": "1",
-            "bold_path": bold_path,
-            "events_path": events_path,
-            "confounds_path": confounds_path,
-        },
+        AnalysisRun(
+            subject="001",
+            session="BL",
+            task="rest",
+            run="1",
+            bold_path=bold_path,
+            events_path=events_path,
+            confounds_path=confounds_path,
+        ),
         {"study_root": str(tmp_path)},
         {"enabled": True, "contrasts": {"condition": "condition"}},
     )
@@ -189,6 +208,46 @@ def test_activation_png_failure_does_not_prevent_scientific_outputs(
     assert output_order.index("design_png") > output_order.index("mask")
     assert output_order[-1] == "report"
     assert len(list((tmp_path / "derivatives" / "hbicproc" / "sub-001" / "ses-BL" / "func").glob("*.nii.gz"))) >= 5
+
+    skipped_result = plugin._run_single_run(
+        "001",
+        "rest",
+        AnalysisRun(
+            subject="001",
+            session="BL",
+            task="rest",
+            run="1",
+            bold_path=bold_path,
+            events_path=events_path,
+            confounds_path=confounds_path,
+        ),
+        {"study_root": str(tmp_path)},
+        {"enabled": True, "contrasts": {"condition": "condition"}},
+    )
+
+    assert skipped_result.success is True
+    assert skipped_result.skipped is True
+    assert skipped_result.details["output_based_skip"] is True
+
+    rerun_result = plugin._run_single_run(
+        "001",
+        "rest",
+        AnalysisRun(
+            subject="001",
+            session="BL",
+            task="rest",
+            run="1",
+            bold_path=bold_path,
+            events_path=events_path,
+            confounds_path=confounds_path,
+        ),
+        {"study_root": str(tmp_path)},
+        {"enabled": True, "contrasts": {"condition": "condition"}},
+        rerun=True,
+    )
+
+    assert rerun_result.success is True
+    assert rerun_result.skipped is False
 
 
 def test_dataset_index_normalizes_session_and_run_entities_without_prefix() -> None:
