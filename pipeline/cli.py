@@ -45,6 +45,7 @@ def _run_for_all(stage_name, config, dry_run=False, rerun=False, plugin_name=Non
         print("No subjects found in BIDS output directory.")
         return 1
     runner = PipelineRunner(config)
+    runner.prepare_stage(stage_name, rerun=rerun, plugin_name=plugin_name)
     exit_code = 0
     for subject in subjects:
         print(f"\n=== {stage_name} {subject} ===")
@@ -57,6 +58,7 @@ def _run_for_all(stage_name, config, dry_run=False, rerun=False, plugin_name=Non
 
 def _run_subject_stage(stage_name, subject, config, dry_run=False, rerun=False, plugin_name=None):
     runner = PipelineRunner(config)
+    runner.prepare_stage(stage_name, rerun=rerun, plugin_name=plugin_name)
     result = runner.run_stage(stage_name, subject, dry_run=dry_run, rerun=rerun, plugin_name=plugin_name)
     _print_result(result)
     return 0 if result.success else 1

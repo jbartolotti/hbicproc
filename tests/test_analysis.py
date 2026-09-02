@@ -59,7 +59,10 @@ def test_analysis_stage_ignores_subject_level_completion_state(monkeypatch: pyte
     assert result.skipped is True
 
 
-def test_analysis_stage_reuses_dataset_index_across_subjects(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analysis_stage_reuses_dataset_index_across_subjects(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     created: list[object] = []
     received: list[object] = []
 
@@ -82,11 +85,14 @@ def test_analysis_stage_reuses_dataset_index_across_subjects(monkeypatch: pytest
 
     config = {"analysis": {"subject": {"activation": {"enabled": True}}}}
     stage = AnalysisStage()
-    stage.execute("001", config, {})
-    stage.execute("002", config, {})
+    with caplog.at_level(logging.INFO):
+        stage.prepare(config)
+        stage.execute("001", config, {})
+        stage.execute("002", config, {})
 
     assert len(created) == 1
     assert received == [created[0], created[0]]
+    assert "BIDS indexing" in caplog.text
 
 
 def test_analysis_plugin_load_failure_is_logged_and_raised(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:

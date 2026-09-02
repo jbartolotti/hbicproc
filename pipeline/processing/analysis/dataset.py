@@ -90,6 +90,11 @@ class DatasetIndex:
             tuple[str | None, str | None, str | None, str | None],
             tuple[AnalysisRun, ...],
         ] = {}
+        logger.info(
+            "BIDS indexing: starting shared raw and derivative BIDSLayout construction (raw_root=%s derivative_root=%s)",
+            self.bids_root,
+            self.derivative_root,
+        )
         if self.bids_root.exists():
             try:
                 self.layout = BIDSLayout(
@@ -111,6 +116,11 @@ class DatasetIndex:
                 )
             except Exception:
                 self.derivative_layout = None
+        logger.info(
+            "BIDS indexing: shared layouts ready (raw_layout=%s derivative_layout=%s)",
+            self.layout is not None,
+            self.derivative_layout is not None,
+        )
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "DatasetIndex":

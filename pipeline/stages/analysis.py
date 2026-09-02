@@ -1,6 +1,10 @@
+import logging
+
 from .base import BaseStage, StageResult
 from ..processing.analysis.dataset import DatasetIndex
 from ..processing.analysis.service import run as analysis_run
+
+logger = logging.getLogger(__name__)
 
 
 class AnalysisStage(BaseStage):
@@ -15,6 +19,11 @@ class AnalysisStage(BaseStage):
         if self._dataset_index is None:
             self._dataset_index = DatasetIndex.from_config(config)
         return self._dataset_index
+
+    def prepare(self, config, *, rerun=False, plugin_name=None):
+        if self._requires_dataset_index(config, rerun=rerun, plugin_name=plugin_name):
+            logger.info("BIDS indexing: preparing shared raw and derivative BIDS layouts before subject processing.")
+            self._get_dataset_index(config)
 
     def _requires_dataset_index(self, config, *, rerun=False, plugin_name=None):
         if rerun:

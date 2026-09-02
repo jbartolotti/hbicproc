@@ -17,6 +17,9 @@ class BaseStage:
     state_key = None
     human_step = False
 
+    def prepare(self, config, **kwargs):
+        _ = (config, kwargs)
+
     def run(self, subject, config, state, dry_run=False, rerun=False):
         raise NotImplementedError("Stage implementations must override run().")
 

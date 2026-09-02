@@ -24,6 +24,11 @@ class PipelineRunner:
     def save_state(self, subject, state):
         save_subject_state(self.config, subject, state)
 
+    def prepare_stage(self, stage_name, **kwargs):
+        if stage_name not in self.stages:
+            return
+        self.stages[stage_name].prepare(self.config, **kwargs)
+
     def get_next_stage(self, state):
         for stage_name in self.stage_order:
             stage = self.stages[stage_name]
