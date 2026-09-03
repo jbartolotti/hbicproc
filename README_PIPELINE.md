@@ -14,6 +14,7 @@ hbicproc validate sub-001
 hbicproc qc sub-001
 hbicproc exclude sub-001 --run task-nback_run-2
 hbicproc preprocess sub-001
+hbicproc analysis sub-001
 hbicproc behavior sub-001 --task stroop
 hbicproc run sub-001
 hbicproc status
@@ -24,6 +25,7 @@ Batch commands:
 ```bash
 hbicproc qc --all
 hbicproc preprocess --all
+hbicproc analysis --all
 hbicproc behavior --all
 hbicproc run --all
 ```
@@ -41,6 +43,16 @@ Stage commands also support `--rerun` to force execution even when a stage is ma
 
 The `behavior` stage is optional and independent of the ordered pipeline above; it can be run at any
 time once E-Prime source files are available.
+
+The `analysis` stage is also independent of the ordered preprocessing pipeline and must be invoked
+with an explicit subject or `--all`. Its task-centered configuration separates reusable model
+specifications from analysis specifications. The global `analysis.input_dataset` is inherited by every
+task, and an individual task may override it with its own dataset name and path. Configured tasks
+default to enabled unless `enabled` is explicitly set to `false`.
+
+PR 1 establishes analysis planning, task/run contexts, derivative namespaces, and model/analysis
+interfaces. It does not fit models or generate scientific analysis outputs yet. See
+[docs/analysis.md](docs/analysis.md) for the configuration schema and output namespace.
 
 Each stage is a thin `pipeline.stages` wrapper around a corresponding `pipeline.processing.<stage>.service`
 module. The CLI (`pipeline/cli.py`) builds its subcommands directly from the `STAGE_CLASSES` registry in

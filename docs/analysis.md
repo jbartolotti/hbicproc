@@ -2,23 +2,14 @@
 
 The analysis feature is implemented as a normal pipeline stage rather than as a standalone CLI bypass. The stage wrapper sits in the package’s usual layering:
 
-- CLI -> runner -> stage -> processing service -> plugin registry -> plugin implementations
 
 ## Stage contract
 
-- `pipeline/stages/analysis.py` defines `AnalysisStage`.
-- `pipeline/processing/analysis/service.py` contains the public `run(subject, config, dry_run=False, rerun=False)` entrypoint used by the stage.
-- The stage is registered in `pipeline/stages/__init__.py` so it is auto-exposed by the generic `STAGE_CLASSES` CLI wiring.
-- Since analysis is an optional subject-level workflow, it is intentionally not included in `PipelineRunner.stage_order` and therefore requires an explicit subject or `--all` when invoked.
 
 ## Plugin registry
 
 The plugin layer remains available behind the processing service for extensibility:
 
-- `pipeline/processing/analysis/base.py` defines the plugin interface.
-- `pipeline/processing/analysis/registry.py` discovers and runs plugin implementations.
-- `pipeline/processing/analysis/activation/plugin.py` is the first concrete plugin.
-- `pipeline/processing/analysis/activation/derivatives.py` builds BIDS-derivative output names consistently.
 
 This keeps the scientific logic modular without breaking the project’s stage-first architecture.
 
@@ -86,10 +77,6 @@ Session values are stored internally without BIDS prefixes, for example `baselin
 
 The plugin relies on Nilearn APIs whenever they provide the required functionality:
 
-- effect variance is generated with `glm.compute_contrast(..., output_type="effect_variance")`
-- design matrices are plotted with `nilearn.plotting.plot_design_matrix`
-- residuals are read from `glm.residuals_` when available, with a warning and no failure if residual images are not exposed by the current Nilearn implementation
-- output images use effect-map terminology instead of beta-map terminology
 
 ### Output naming
 
@@ -98,3 +85,131 @@ Output files are written as BIDS-style derivative names with entity labels such 
 ## Future analyses
 
 New analysis methods should follow the same pattern: add a plugin class under `pipeline/processing/analysis/...`, keep it isolated from the stage wrapper, and expose it through the `analysis` stage so it integrates with the existing pipeline conventions.
+
+# Subject-level analysis architecture
+
+The analysis stage is a user-facing pipeline stage exposed as `hbicproc analysis`.
+It uses a task-centered configuration and separates reusable model derivatives from
+scientific analysis products:
+
+```text
+task -> model specification -> model derivatives -> analysis specification -> analysis derivatives
+```
+
+The model layer will own fitting and reusable derivatives. The analysis layer will
+consume those derivatives and write analysis-specific outputs. PR 1 establishes the
+configuration, context, namespaces, and interfaces only; it does not fit a model or
+write scientific outputs.
+
+## Configuration
+
+`pipeline_config.json` is the authoritative configuration format. The global input
+dataset is inherited by every task unless a task supplies its own `input_dataset`:
+
+```json
+{
+  "analysis": {
+    "output_dir": "derivatives/hbicproc",
+    "input_dataset": {
+      "name": "fmriprep",
+      "path": "derivatives/fmriprep"
+    },
+    "subject": {
+      "tasks": {
+        "nback": {
+          "enabled": true,
+          "models": {
+            "canonical_glm": {
+              "type": "canonical_glm",
+              "smoothing_fwhm": 6.0,
+              "high_pass": 0.01,
+              "drift_model": "cosine",
+              "hrf_model": "spm",
+              "conditions": ["oneback", "twoback"],
+              "confounds": {
+                "motion": true,
+                "motion_derivatives": true,
+                "framewise_displacement": true,
+                "acompcor": 5
+              },
+              "atlases": ["schaefer200", "schaefer400"]
+            }
+          },
+          "analyses": {
+            "activation": {
+              "enabled": true,
+              "model": "canonical_glm",
+              "contrasts": {
+                "2back_gt_1back": "twoback - oneback"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Configured tasks default to `enabled: true`; specify `enabled: false` to temporarily
+exclude a task. Configured analyses also default to enabled. Every enabled analysis
+must reference a model declared by the same task.
+
+The input dataset object contains a user-facing name and a path. For example, a task
+can override the global fMRIPrep input with:
+
+```json
+"input_dataset": {
+  "name": "afni",
+  "path": "derivatives/afni"
+}
+```
+
+Paths are resolved relative to the configuration/study root and are not copied into
+the analysis output tree.
+
+## Derivative namespaces
+
+Model and analysis outputs have different namespaces, even when their names are the
+same. Run-level contexts receive a run-specific directory so independent runs cannot
+overwrite one another:
+
+```text
+derivatives/hbicproc/
+  sub-001/
+    ses-01/
+      func/
+        task-nback/
+          run-1/
+            models/
+              canonical_glm/
+            analyses/
+              activation/
+```
+
+When no run entity exists, the `run-*` directory is omitted. The path abstraction is
+implemented by `DerivativePathBuilder`; model and analysis implementations should use
+it rather than constructing paths directly.
+
+## Interfaces
+
+- `TaskRunContext` identifies a subject/task/session/run and its discovered inputs.
+- `ModelSpec` describes a model instance and its model-only fingerprint configuration.
+- `AnalysisSpec` describes an analysis, its model reference, and required derivatives.
+- `TaskPlan` binds task configuration to its input dataset and model/analysis specs.
+
+Atlas configuration is deliberately excluded from model fingerprint configuration.
+Later atlas derivatives can therefore be regenerated without refitting a GLM.
+
+## CLI behavior
+
+The existing command names remain unchanged:
+
+```text
+hbicproc analysis sub-001
+hbicproc analysis --all
+```
+
+The PR 1 analysis service validates configuration and reports the task/model/analysis
+plan. It intentionally performs no model fitting. Model execution, dependency reuse,
+atlas generation, and activation outputs are introduced by later PRs.

@@ -39,27 +39,27 @@ def _write_default_config(path):
     print("Edit the file to adjust study paths, containers, and credentials.")
 
 
-def _run_for_all(stage_name, config, dry_run=False, rerun=False, plugin_name=None):
+def _run_for_all(stage_name, config, dry_run=False, rerun=False):
     subjects = list_subjects(config)
     if not subjects:
         print("No subjects found in BIDS output directory.")
         return 1
     runner = PipelineRunner(config)
-    runner.prepare_stage(stage_name, rerun=rerun, plugin_name=plugin_name)
+    runner.prepare_stage(stage_name, rerun=rerun)
     exit_code = 0
     for subject in subjects:
         print(f"\n=== {stage_name} {subject} ===")
-        result = runner.run_stage(stage_name, subject, dry_run=dry_run, rerun=rerun, plugin_name=plugin_name)
+        result = runner.run_stage(stage_name, subject, dry_run=dry_run, rerun=rerun)
         _print_result(result)
         if not result.success:
             exit_code = 1
     return exit_code
 
 
-def _run_subject_stage(stage_name, subject, config, dry_run=False, rerun=False, plugin_name=None):
+def _run_subject_stage(stage_name, subject, config, dry_run=False, rerun=False):
     runner = PipelineRunner(config)
-    runner.prepare_stage(stage_name, rerun=rerun, plugin_name=plugin_name)
-    result = runner.run_stage(stage_name, subject, dry_run=dry_run, rerun=rerun, plugin_name=plugin_name)
+    runner.prepare_stage(stage_name, rerun=rerun)
+    result = runner.run_stage(stage_name, subject, dry_run=dry_run, rerun=rerun)
     _print_result(result)
     return 0 if result.success else 1
 
@@ -117,7 +117,6 @@ def _subject_exclusion(subject, config, runs, clear):
 
 def _handle_stage(parser, args, config):
     stage_name = args.command
-    plugin_name = getattr(args, "plugin", None)
 
     if stage_name == "download" and args.summary and args.all:
         parser.error("Cannot specify --summary and --all together.")
@@ -138,7 +137,7 @@ def _handle_stage(parser, args, config):
     if args.all:
         if args.subject:
             parser.error("Cannot specify a subject and --all together.")
-        return _run_for_all(stage_name, config, dry_run=args.dry_run, rerun=args.rerun, plugin_name=plugin_name)
+        return _run_for_all(stage_name, config, dry_run=args.dry_run, rerun=args.rerun)
 
     subject = args.subject
     if not subject:
@@ -151,7 +150,7 @@ def _handle_stage(parser, args, config):
             return 1
         print(f"No subject specified. Running {stage_name} for next eligible subject: {subject}")
 
-    return _run_subject_stage(stage_name, subject, config, dry_run=args.dry_run, rerun=args.rerun, plugin_name=plugin_name)
+    return _run_subject_stage(stage_name, subject, config, dry_run=args.dry_run, rerun=args.rerun)
 
 
 def _handle_status(args, config):
@@ -213,8 +212,6 @@ def _build_parser():
             )
         elif stage_name == "behavior":
             stage_parser.add_argument("--task", default=None, help="Behavioral task name to parse.")
-        elif stage_name == "analysis":
-            stage_parser.add_argument("--plugin", default=None, help="Run only a specific analysis plugin.")
 
     status_parser = subparsers.add_parser("status", help="Generate a pipeline status figure across subjects and stages.")
     status_parser.add_argument(

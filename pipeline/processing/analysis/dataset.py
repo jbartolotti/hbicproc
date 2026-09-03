@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from bids import BIDSLayout, BIDSLayoutIndexer
+
+from .context import InputDataset, TaskRunContext
 
 logger = logging.getLogger(__name__)
 
@@ -43,28 +44,6 @@ def _normalize_entity_text(value: Any, *, prefix: str | None = None) -> str | No
     return normalized
 
 
-@dataclass(frozen=True)
-class AnalysisRun:
-    subject: str
-    task: str
-    session: str | None = None
-    run: str | None = None
-    bold_path: Path | str = ""
-    events_path: Path | str = ""
-    confounds_path: Path | str = ""
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "subject": self.subject,
-            "task": self.task,
-            "session": self.session,
-            "run": self.run,
-            "bold_path": str(self.bold_path),
-            "events_path": str(self.events_path),
-            "confounds_path": str(self.confounds_path),
-        }
-
-
 class DatasetIndex:
     """Central BIDS-aware dataset index for discovery-oriented analysis plugins."""
 
@@ -73,22 +52,24 @@ class DatasetIndex:
         bids_root: str | Path | None = None,
         *,
         study_root: str | Path | None = None,
-        derivative_dataset: str | Path = "fmriprep",
+        input_dataset: InputDataset | None = None,
     ) -> None:
         root = Path(bids_root) if bids_root is not None else (Path(study_root) if study_root is not None else Path("."))
         self.bids_root = root.resolve() if root.exists() else root
         self.study_root = Path(study_root).resolve() if study_root is not None and Path(study_root).exists() else self.bids_root
-        self.derivative_dataset = str(derivative_dataset)
-        derivative_path = Path(derivative_dataset)
-        if not derivative_path.is_absolute():
-            derivative_path = self.bids_root / "derivatives" / derivative_path
+        self.input_dataset = input_dataset or InputDataset(
+            name="fmriprep",
+            path=self.bids_root / "derivatives" / "fmriprep",
+        )
+        derivative_path = Path(self.input_dataset.path)
         self.derivative_root = derivative_path.resolve() if derivative_path.exists() else derivative_path
 
         self.layout: BIDSLayout | None = None
         self.derivative_layout: BIDSLayout | None = None
+        self._derivative_layouts: dict[Path, BIDSLayout | None] = {}
         self._task_runs_cache: dict[
-            tuple[str | None, str | None, str | None, str | None],
-            tuple[AnalysisRun, ...],
+            tuple[str | None, str | None, str | None, str | None, str],
+            tuple[TaskRunContext, ...],
         ] = {}
         logger.info(
             "BIDS indexing: starting shared raw and derivative BIDSLayout construction (raw_root=%s derivative_root=%s)",
@@ -106,16 +87,8 @@ class DatasetIndex:
             except Exception:
                 self.layout = None
         if self.derivative_root.exists():
-            try:
-                self.derivative_layout = BIDSLayout(
-                    str(self.derivative_root),
-                    validate=False,
-                    derivatives=False,
-                    is_derivative=True,
-                    indexer=BIDSLayoutIndexer(validate=False),
-                )
-            except Exception:
-                self.derivative_layout = None
+            self.derivative_layout = self._build_derivative_layout(self.derivative_root)
+        self._derivative_layouts[self.derivative_root] = self.derivative_layout
         logger.info(
             "BIDS indexing: shared layouts ready (raw_layout=%s derivative_layout=%s)",
             self.layout is not None,
@@ -123,14 +96,29 @@ class DatasetIndex:
         )
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "DatasetIndex":
+    def from_config(
+        cls,
+        config: dict[str, Any],
+        *,
+        task_config: dict[str, Any] | None = None,
+    ) -> "DatasetIndex":
         bids_root = config.get("bids_root") or config.get("study_root") or "."
         study_root = config.get("study_root") or bids_root
         analysis = config.get("analysis", {})
-        derivative_dataset = "fmriprep"
-        if isinstance(analysis, dict):
-            derivative_dataset = analysis.get("derivative_dataset") or derivative_dataset
-        return cls(bids_root=bids_root, study_root=study_root, derivative_dataset=derivative_dataset)
+        input_dataset = analysis.get("input_dataset") if isinstance(analysis, dict) else None
+        if task_config and "input_dataset" in task_config:
+            input_dataset = task_config["input_dataset"]
+        if not isinstance(input_dataset, dict):
+            raise ValueError("analysis.input_dataset must be an object with 'name' and 'path'.")
+        dataset_name = str(input_dataset.get("name", "")).strip()
+        dataset_path = str(input_dataset.get("path", "")).strip()
+        if not dataset_name or not dataset_path:
+            raise ValueError("analysis.input_dataset must define non-empty 'name' and 'path'.")
+        return cls(
+            bids_root=bids_root,
+            study_root=study_root,
+            input_dataset=InputDataset(dataset_name, Path(dataset_path)),
+        )
 
     def get_task_runs(
         self,
@@ -139,12 +127,21 @@ class DatasetIndex:
         task: str | None = None,
         session: str | None = None,
         run: str | None = None,
-    ) -> list[AnalysisRun]:
+        input_dataset: InputDataset | None = None,
+    ) -> list[TaskRunContext]:
         normalized_subject = _normalize_entity_text(subject, prefix="sub") if subject is not None else None
         normalized_task = _normalize_entity_text(task, prefix="task") if task is not None else None
         normalized_session = _normalize_entity_text(session, prefix="ses") if session is not None else None
         normalized_run = _normalize_entity_text(run, prefix="run") if run is not None else None
-        cache_key = (normalized_subject, normalized_task, normalized_session, normalized_run)
+        selected_dataset = input_dataset or self.input_dataset
+        selected_root = Path(selected_dataset.path)
+        cache_key = (
+            normalized_subject,
+            normalized_task,
+            normalized_session,
+            normalized_run,
+            str(selected_root),
+        )
         cached_runs = self._task_runs_cache.get(cache_key)
         if cached_runs is not None:
             logger.info(
@@ -157,15 +154,18 @@ class DatasetIndex:
             )
             return list(cached_runs)
 
-        if self.layout is None or self.derivative_layout is None:
+        derivative_root = selected_root
+        derivative_layout = self._get_derivative_layout(derivative_root)
+
+        if self.layout is None or derivative_layout is None:
             logger.info(
                 "Dataset discovery skipped for subject=%s task=%s: raw_layout=%s derivative_layout=%s derivative_dataset=%s derivative_root=%s",
                 subject,
                 task,
                 self.layout is not None,
-                self.derivative_layout is not None,
-                self.derivative_dataset,
-                self.derivative_root,
+                derivative_layout is not None,
+                selected_dataset.name,
+                derivative_root,
             )
             self._task_runs_cache[cache_key] = ()
             return []
@@ -183,7 +183,7 @@ class DatasetIndex:
         )
 
         bold_records = self._query(
-            self.derivative_layout,
+            derivative_layout,
             suffix="bold",
             extension=[".nii.gz", ".nii"],
             subject=normalized_subject,
@@ -203,7 +203,7 @@ class DatasetIndex:
         )
 
         confounds_records = self._query(
-            self.derivative_layout,
+            derivative_layout,
             suffix="timeseries",
             extension=".tsv",
             subject=normalized_subject,
@@ -224,7 +224,7 @@ class DatasetIndex:
         logger.info("Discovered events files: %s", [str(getattr(record, 'path', record)) for record in events_records])
         logger.info("Discovered confounds files: %s", [str(getattr(record, 'path', record)) for record in confounds_records])
 
-        runs: list[AnalysisRun] = []
+        runs: list[TaskRunContext] = []
         seen: set[tuple[str, str, str | None, str | None]] = set()
 
         for bold_record in bold_records:
@@ -289,7 +289,7 @@ class DatasetIndex:
                 continue
             seen.add(key)
 
-            resolved_run = AnalysisRun(
+            resolved_run = TaskRunContext(
                 subject=subject_value or "",
                 task=task_value or "",
                 session=session_value,
@@ -297,13 +297,33 @@ class DatasetIndex:
                 bold_path=Path(str(bold_record.path)),
                 events_path=Path(str(event_match.path)),
                 confounds_path=Path(str(confounds_match.path)),
+                input_dataset=selected_dataset,
             )
             runs.append(resolved_run)
 
-        logger.info("Resolved AnalysisRun objects for subject=%s task=%s: %s", normalized_subject, normalized_task, [run.as_dict() for run in runs])
+        logger.info("Resolved task run contexts for subject=%s task=%s: %s", normalized_subject, normalized_task, [run.as_dict() for run in runs])
         resolved_runs = tuple(sorted(runs, key=lambda item: (item.session or "", item.run or "")))
         self._task_runs_cache[cache_key] = resolved_runs
         return list(resolved_runs)
+
+    def _get_derivative_layout(self, derivative_root: Path) -> BIDSLayout | None:
+        if derivative_root not in self._derivative_layouts:
+            self._derivative_layouts[derivative_root] = self._build_derivative_layout(derivative_root)
+        return self._derivative_layouts[derivative_root]
+
+    def _build_derivative_layout(self, derivative_root: Path) -> BIDSLayout | None:
+        if not derivative_root.exists():
+            return None
+        try:
+            return BIDSLayout(
+                str(derivative_root),
+                validate=False,
+                derivatives=False,
+                is_derivative=True,
+                indexer=BIDSLayoutIndexer(validate=False),
+            )
+        except Exception:
+            return None
 
     def _query(self, layout: BIDSLayout | None, **filters: Any) -> list[Any]:
         if layout is None:
@@ -460,7 +480,6 @@ def get_dataset_index(config: dict[str, Any]) -> DatasetIndex:
 
 
 __all__ = [
-    "AnalysisRun",
     "DatasetIndex",
     "get_dataset_index",
 ]

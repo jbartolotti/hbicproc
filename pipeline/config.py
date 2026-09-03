@@ -16,6 +16,7 @@ def load_config(path="pipeline_config.json"):
 
     config_dir = config_path.parent
     config = _apply_defaults(config)
+    validate_config(config)
     config = _resolve_paths(config, config_dir)
     return config
 
@@ -31,6 +32,7 @@ def save_default_config(path="pipeline_config.json"):
 
 def load_default_config(root_dir="."):
     config = _apply_defaults({})
+    validate_config(config)
     config_dir = Path(root_dir)
     return _resolve_paths(config, config_dir)
 
@@ -92,31 +94,13 @@ def _apply_defaults(config):
             "exclusions_file": "derivatives/hbicproc/exclusions.json"
         },
         "analysis": {
-            "derivative_dataset": "fmriprep",
+            "output_dir": "derivatives/hbicproc",
+            "input_dataset": {
+                "name": "fmriprep",
+                "path": "derivatives/fmriprep"
+            },
             "subject": {
-                "activation": {
-                    "enabled": False,
-                    "tasks": [],
-                    "engine": "nilearn",
-                    "smoothing_fwhm": 6.0,
-                    "high_pass": 0.01,
-                    "drift_model": "cosine",
-                    "hrf_model": "spm",
-                    "output_dir": "derivatives/hbicproc",
-                    "fd_threshold": 0.5,
-                    "conditions": [],
-                    "contrasts": {},
-                    "confounds": {
-                        "motion": True,
-                        "motion_derivatives": True,
-                        "framewise_displacement": True,
-                        "acompcor": 5
-                    },
-                    "motion_qc": {
-                        "fd_threshold": 0.5,
-                        "fd_metric": "framewise_displacement"
-                    }
-                }
+                "tasks": {}
             }
         },
         "behavior": {
@@ -142,7 +126,106 @@ def _apply_defaults(config):
         extra_list = user_tokens.get(token_type, [])
         merged_tokens[token_type] = list(dict.fromkeys(default_list + extra_list))
     merged["tokens"] = merged_tokens
+    _normalize_analysis_configuration(merged["analysis"])
     return merged
+
+
+def _normalize_analysis_configuration(analysis):
+    if not isinstance(analysis, dict):
+        return
+
+    subject = analysis.setdefault("subject", {})
+    if not isinstance(subject, dict):
+        return
+    tasks = subject.setdefault("tasks", {})
+    if not isinstance(tasks, dict):
+        return
+
+    for task_config in tasks.values():
+        if isinstance(task_config, dict):
+            task_config.setdefault("enabled", True)
+            task_config.setdefault("models", {})
+            task_config.setdefault("analyses", {})
+            analyses = task_config.get("analyses")
+            if isinstance(analyses, dict):
+                for analysis_config in analyses.values():
+                    if isinstance(analysis_config, dict):
+                        analysis_config.setdefault("enabled", True)
+
+
+def validate_config(config):
+    """Validate the authoritative JSON configuration schema."""
+
+    analysis = config.get("analysis")
+    if not isinstance(analysis, dict):
+        raise ValueError("The 'analysis' configuration must be an object.")
+    if not str(analysis.get("output_dir", "")).strip():
+        raise ValueError("analysis.output_dir must not be empty.")
+
+    input_dataset = analysis.get("input_dataset")
+    _validate_input_dataset(input_dataset, field_name="analysis.input_dataset")
+
+    subject = analysis.get("subject")
+    if not isinstance(subject, dict):
+        raise ValueError("analysis.subject must be an object.")
+    if "activation" in subject:
+        raise ValueError(
+            "analysis.subject.activation is obsolete; configure analyses under analysis.subject.tasks."
+        )
+
+    tasks = subject.get("tasks")
+    if not isinstance(tasks, dict):
+        raise ValueError("analysis.subject.tasks must be an object keyed by task name.")
+
+    for task_name, task_config in tasks.items():
+        if not str(task_name).strip():
+            raise ValueError("Analysis task names must not be empty.")
+        if not isinstance(task_config, dict):
+            raise ValueError(f"analysis.subject.tasks.{task_name} must be an object.")
+        if not isinstance(task_config.get("enabled", True), bool):
+            raise ValueError(f"analysis.subject.tasks.{task_name}.enabled must be a boolean.")
+        if "input_dataset" in task_config:
+            _validate_input_dataset(
+                task_config["input_dataset"],
+                field_name=f"analysis.subject.tasks.{task_name}.input_dataset",
+            )
+
+        models = task_config.get("models", {})
+        if not isinstance(models, dict):
+            raise ValueError(f"analysis.subject.tasks.{task_name}.models must be an object.")
+        for model_name, model_config in models.items():
+            if not str(model_name).strip() or not isinstance(model_config, dict):
+                raise ValueError(
+                    f"analysis.subject.tasks.{task_name}.models entries must be named objects."
+                )
+            if not str(model_config.get("type", "")).strip():
+                raise ValueError(
+                    f"analysis.subject.tasks.{task_name}.models.{model_name}.type must not be empty."
+                )
+
+        analyses = task_config.get("analyses", {})
+        if not isinstance(analyses, dict):
+            raise ValueError(f"analysis.subject.tasks.{task_name}.analyses must be an object.")
+        for analysis_name, analysis_config in analyses.items():
+            field_name = f"analysis.subject.tasks.{task_name}.analyses.{analysis_name}"
+            if not str(analysis_name).strip() or not isinstance(analysis_config, dict):
+                raise ValueError(f"{field_name} must be a named object.")
+            if not isinstance(analysis_config.get("enabled", True), bool):
+                raise ValueError(f"{field_name}.enabled must be a boolean.")
+            model_name = str(analysis_config.get("model", "")).strip()
+            if not model_name:
+                raise ValueError(f"{field_name}.model must reference a model.")
+            if model_name not in models:
+                raise ValueError(f"{field_name}.model references unknown model '{model_name}'.")
+
+
+def _validate_input_dataset(value, *, field_name):
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be an object with 'name' and 'path'.")
+    if not str(value.get("name", "")).strip():
+        raise ValueError(f"{field_name}.name must not be empty.")
+    if not str(value.get("path", "")).strip():
+        raise ValueError(f"{field_name}.path must not be empty.")
 
 
 def _deep_merge(base, override):
@@ -180,7 +263,31 @@ def _resolve_paths(config, root_dir):
         _resolve_nested_paths(section_data, root_dir, study_root)
         config[section] = section_data
 
+    _resolve_analysis_input_dataset_paths(config.get("analysis", {}), root_dir, study_root)
+
     return config
+
+
+def _resolve_analysis_input_dataset_paths(analysis, config_dir, study_root):
+    if not isinstance(analysis, dict):
+        return
+
+    input_dataset = analysis.get("input_dataset")
+    if isinstance(input_dataset, dict) and isinstance(input_dataset.get("path"), str):
+        input_dataset["path"] = str(_resolve_path(input_dataset["path"], config_dir, study_root))
+
+    subject = analysis.get("subject")
+    tasks = subject.get("tasks") if isinstance(subject, dict) else None
+    if not isinstance(tasks, dict):
+        return
+    for task_config in tasks.values():
+        if not isinstance(task_config, dict):
+            continue
+        task_input_dataset = task_config.get("input_dataset")
+        if isinstance(task_input_dataset, dict) and isinstance(task_input_dataset.get("path"), str):
+            task_input_dataset["path"] = str(
+                _resolve_path(task_input_dataset["path"], config_dir, study_root)
+            )
 
 
 def _resolve_nested_paths(section_data, root_dir, study_root):

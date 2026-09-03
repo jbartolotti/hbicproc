@@ -3,23 +3,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .dataset import DatasetIndex
-from .registry import get_analysis_registry
+from .planning import build_task_plans
 
 logger = logging.getLogger(__name__)
-
-
-def _enabled_plugin_names(config: dict[str, Any]) -> list[str]:
-    analysis_config = config.get("analysis", {})
-    subject_config = analysis_config.get("subject", {})
-    if not isinstance(subject_config, dict):
-        return []
-
-    enabled: list[str] = []
-    for name, plugin_cfg in subject_config.items():
-        if isinstance(plugin_cfg, dict) and plugin_cfg.get("enabled"):
-            enabled.append(name)
-    return enabled
 
 
 def run(
@@ -27,74 +13,59 @@ def run(
     config: dict[str, Any],
     dry_run: bool = False,
     rerun: bool = False,
-    plugin_name: str | None = None,
-    dataset_index: DatasetIndex | None = None,
 ) -> dict[str, Any]:
+    """Build the PR 1 analysis plan without fitting or executing models."""
+
     try:
-        registry = get_analysis_registry()
-    except Exception as exc:
-        logger.exception("Analysis plugin discovery failed for subject=%s.", subject)
+        task_plans = build_task_plans(config, subject)
+    except (TypeError, ValueError) as exc:
+        logger.warning("Analysis configuration is invalid for subject=%s: %s", subject, exc)
         return {
             "success": False,
             "skipped": False,
-            "message": f"Analysis plugin loading failed for subject {subject}: {exc}",
+            "message": f"Analysis configuration is invalid for subject {subject}: {exc}",
             "details": {"subject": subject, "error": str(exc)},
         }
-    if plugin_name:
-        requested = [plugin_name]
-    else:
-        requested = _enabled_plugin_names(config) or registry.list_plugins()
 
-    if plugin_name and registry.get(plugin_name) is None:
+    if not task_plans:
         return {
-            "success": False,
-            "skipped": False,
-            "message": f"Unknown analysis plugin: {plugin_name}",
-            "details": {"subject": subject, "plugins": requested},
+            "success": True,
+            "skipped": True,
+            "message": f"No enabled analysis tasks are configured for subject {subject}.",
+            "details": {"subject": subject, "tasks": []},
         }
 
-    results = []
-    for name in requested:
-        plugin_cls = registry.get(name)
-        if plugin_cls is None:
-            continue
-        plugin = plugin_cls()
-        plugin_config = plugin.get_config(config)
-        if dataset_index is None and (rerun or plugin_config.get("enabled", False)):
-            dataset_index = DatasetIndex.from_config(config)
-        results.append(
-            plugin.execute(
-                subject,
-                config,
-                dry_run=dry_run,
-                rerun=rerun,
-                plugin_config=plugin_config,
-                dataset_index=dataset_index,
-            )
-        )
+    analysis_config = config.get("analysis", {})
+    output_root = analysis_config.get("output_dir", "") if isinstance(analysis_config, dict) else ""
+    planned_models = []
+    planned_analyses = []
+    for task_plan in task_plans:
+        planned_models.extend(plan.as_dict() for plan in task_plan.model_plans(subject, output_root))
+        planned_analyses.extend(plan.as_dict() for plan in task_plan.analysis_plans(subject, output_root))
 
-    if not results:
-        return {
-            "success": False,
-            "skipped": False,
-            "message": (
-                f"No analysis plugins were available for subject {subject}. "
-                "Plugin discovery completed without registering any plugins."
-            ),
-            "details": {"subject": subject, "plugins": requested},
-        }
-
-    skipped = all(result.skipped for result in results)
-    success = all(result.success for result in results)
-    details = {
-        "subject": subject,
-        "plugins": requested,
-        "results": [result.__dict__ for result in results],
-    }
-
+    logger.info(
+        "Prepared analysis plan for subject=%s tasks=%s models=%d analyses=%d",
+        subject,
+        [task.task for task in task_plans],
+        len(planned_models),
+        len(planned_analyses),
+    )
+    execution_mode = "dry run" if dry_run else "planning only"
+    rerun_text = " with model rerun requested" if rerun else ""
     return {
-        "success": success,
-        "skipped": skipped,
-        "message": "\n".join(result.message for result in results),
-        "details": details,
+        "success": True,
+        "skipped": False,
+        "message": (
+            f"Prepared analysis plan for subject {subject} ({execution_mode}{rerun_text}); "
+            "no model execution was performed."
+        ),
+        "details": {
+            "subject": subject,
+            "tasks": [task.as_dict() for task in task_plans],
+            "models": planned_models,
+            "analyses": planned_analyses,
+        },
     }
+
+
+__all__ = ["run"]
