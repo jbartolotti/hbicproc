@@ -1,3 +1,4 @@
 from .base import ModelPlan, ModelSpec
+from .canonical_glm import CanonicalGLMModel, FittedModel
 
-__all__ = ["ModelPlan", "ModelSpec"]
+__all__ = ["CanonicalGLMModel", "FittedModel", "ModelPlan", "ModelSpec"]

@@ -13,6 +13,7 @@ from pipeline.processing.analysis import (
     build_task_plans,
 )
 from pipeline.processing.analysis.derivatives import DerivativePathBuilder
+from pipeline.processing.analysis.models.canonical_glm import CanonicalGLMModel
 from pipeline.processing.analysis.service import run
 from pipeline.stages import STAGE_CLASSES
 
@@ -147,7 +148,7 @@ def test_model_and_analysis_namespaces_are_separate_and_run_scoped(tmp_path: Pat
     assert model_path != analysis_path
 
 
-def test_analysis_service_only_plans_and_does_not_execute(tmp_path: Path) -> None:
+def test_analysis_service_plans_without_inputs_and_does_not_fit(tmp_path: Path) -> None:
     config = {
         "analysis": {
             "output_dir": str(tmp_path / "derivatives"),
@@ -167,7 +168,8 @@ def test_analysis_service_only_plans_and_does_not_execute(tmp_path: Path) -> Non
 
     assert result["success"] is True
     assert result["details"]["models"][0]["model_type"] == "canonical_glm"
-    assert "no model execution" in result["message"]
+    assert "fitted 0 model run(s)" in result["message"]
+    assert result["details"]["fitted_models"] == []
     assert not (tmp_path / "derivatives").exists()
 
 
@@ -176,3 +178,45 @@ def test_derivative_path_builder_rejects_namespace_path_traversal() -> None:
 
     with pytest.raises(ValueError, match="single path components"):
         DerivativePathBuilder.for_context("derivatives", context, namespace="model", name="../model")
+
+
+def test_canonical_glm_fits_one_run_with_events_and_confounds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bold_path = tmp_path / "bold.nii.gz"
+    events_path = tmp_path / "events.tsv"
+    confounds_path = tmp_path / "confounds.tsv"
+    bold_path.touch()
+    events_path.write_text("onset\tduration\ttrial_type\n0\t1\tone\n", encoding="utf-8")
+    confounds_path.write_text("trans_x\trot_y\n0.1\t0.2\n", encoding="utf-8")
+
+    class FakeGLM:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+            self.design_matrices_ = []
+
+        def fit(self, image: str, *, events: object, confounds: object) -> "FakeGLM":
+            self.image = image
+            self.events = events
+            self.confounds = confounds
+            self.design_matrices_ = [type("Design", (), {"columns": ["one", "trans_x"]})()]
+            return self
+
+    monkeypatch.setattr("pipeline.processing.analysis.models.canonical_glm.FirstLevelModel", FakeGLM)
+    spec = ModelSpec(
+        "canonical_glm",
+        "canonical_glm",
+        {"t_r": 1.0, "confounds": ["trans_x"]},
+    )
+    context = TaskRunContext(
+        subject="001",
+        task="nback",
+        run="1",
+        bold_path=bold_path,
+        events_path=events_path,
+        confounds_path=confounds_path,
+    )
+
+    fitted = CanonicalGLMModel(spec).fit(spec.plan(context, str(tmp_path / "out")))
+
+    assert fitted.estimator.image == str(bold_path)
+    assert list(fitted.events["trial_type"]) == ["one"]
+    assert list(fitted.confounds.columns) == ["trans_x"]
