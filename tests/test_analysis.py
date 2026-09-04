@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import nibabel as nib
 import pandas as pd
 import pytest
 
@@ -15,6 +16,7 @@ from pipeline.processing.analysis import (
     build_task_plans,
 )
 from pipeline.processing.analysis.analyses.activation import ActivationAnalysis
+from pipeline.processing.analysis.analyses.atlas import AtlasCache
 from pipeline.processing.analysis.models.canonical_glm import FittedModel
 from pipeline.processing.analysis.derivatives import DerivativePathBuilder
 from pipeline.processing.analysis.models.canonical_glm import CanonicalGLMModel
@@ -297,3 +299,33 @@ def test_canonical_glm_rejects_missing_required_confounds(tmp_path: Path, monkey
 
     with pytest.raises(ValueError, match="missing required columns: rot_y"):
         CanonicalGLMModel(spec).fit(spec.plan(context, str(tmp_path / "out")))
+
+
+def test_atlas_cache_fetches_once_and_resamples_outside_bids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "atlas.nii.gz"
+    target = tmp_path / "target.nii.gz"
+    nib.save(nib.Nifti1Image(np.ones((2, 2, 2)), np.eye(4)), source)
+    nib.save(nib.Nifti1Image(np.ones((3, 3, 3)), np.eye(4)), target)
+    calls: list[Path] = []
+
+    class Fetched:
+        maps = str(source)
+        labels = ["one"]
+
+    def fetch(**kwargs: object) -> Fetched:
+        calls.append(Path(str(kwargs["data_dir"])))
+        return Fetched()
+
+    monkeypatch.setattr("pipeline.processing.analysis.analyses.atlas.fetch_atlas_schaefer_2018", fetch)
+    cache_dir = tmp_path / "atlas-cache"
+    cache = AtlasCache(cache_dir)
+
+    first = cache.get("schaefer200")
+    second = cache.get("schaefer200")
+    output = tmp_path / "analysis" / "atlas-resampled.nii.gz"
+    cache.resample("schaefer200", nib.load(target), output)
+
+    assert first == second
+    assert calls == [cache_dir]
+    assert output.exists()
+    assert not cache_dir.is_relative_to(tmp_path / "bids")

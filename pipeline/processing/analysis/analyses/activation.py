@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..models.canonical_glm import FittedModel
+from .atlas import AtlasCache
 from .base import AnalysisPlan
 
 
@@ -24,12 +25,23 @@ class ContrastOutput:
         }
 
 
+@dataclass(frozen=True)
+class AtlasOutput:
+    """An atlas resampled to the fitted model's image space."""
+
+    atlas: str
+    path: Path
+
+    def as_dict(self) -> dict[str, str]:
+        return {"atlas": self.atlas, "path": str(self.path)}
+
+
 class ActivationAnalysis:
     """Compute configured activation contrasts from a fitted first-level GLM."""
 
     analysis_type = "activation"
 
-    def run(self, fitted: FittedModel, plan: AnalysisPlan) -> tuple[ContrastOutput, ...]:
+    def run(self, fitted: FittedModel, plan: AnalysisPlan) -> tuple[ContrastOutput | AtlasOutput, ...]:
         contrasts = self._contrasts(plan.spec.configuration.get("contrasts", {}))
         output_types = self._output_types(plan.spec.configuration.get("output_types"))
         output_dir = plan.derivatives.analysis_directory
@@ -37,16 +49,28 @@ class ActivationAnalysis:
             raise ValueError("Activation analysis plan has no analysis derivative directory.")
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        outputs: list[ContrastOutput] = []
+        outputs: list[ContrastOutput | AtlasOutput] = []
+        target_image = None
         for name, definition in contrasts.items():
             for output_type in output_types:
                 image = fitted.estimator.compute_contrast(
                     definition,
                     output_type=output_type,
                 )
+                target_image = image
                 path = output_dir / f"contrast-{self._component(name)}_stat-{self._component(output_type)}.nii.gz"
                 image.to_filename(path)
                 outputs.append(ContrastOutput(name, output_type, path))
+        atlas_names = plan.spec.configuration.get("atlases", fitted.plan.spec.configuration.get("atlases", ()))
+        if isinstance(atlas_names, str):
+            atlas_names = [atlas_names]
+        if target_image is not None and isinstance(atlas_names, (list, tuple, set)):
+            cache = AtlasCache(plan.spec.configuration.get("atlas_cache_dir"))
+            for atlas_name in atlas_names:
+                atlas_text = self._component(str(atlas_name))
+                path = output_dir / f"atlas-{atlas_text}_resampled.nii.gz"
+                cache.resample(str(atlas_name), target_image, path)
+                outputs.append(AtlasOutput(str(atlas_name), path))
         return tuple(outputs)
 
     @staticmethod
@@ -86,4 +110,4 @@ class ActivationAnalysis:
         return text.replace(" ", "-")
 
 
-__all__ = ["ActivationAnalysis", "ContrastOutput"]
+__all__ = ["ActivationAnalysis", "AtlasOutput", "ContrastOutput"]
