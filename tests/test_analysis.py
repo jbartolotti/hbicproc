@@ -279,3 +279,21 @@ def test_activation_analysis_computes_contrasts_from_fitted_model(tmp_path: Path
         / "activation" / "contrast-two_gt_one_stat-effect_size.nii.gz"
     )
     assert outputs[0].path.read_bytes() == b"contrast"
+
+
+def test_canonical_glm_rejects_missing_required_confounds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    events_path = tmp_path / "events.tsv"
+    confounds_path = tmp_path / "confounds.tsv"
+    bold_path = tmp_path / "bold.nii.gz"
+    bold_path.touch()
+    events_path.write_text("onset\tduration\ttrial_type\n0\t1\tone\n", encoding="utf-8")
+    confounds_path.write_text("trans_x\n0.1\n", encoding="utf-8")
+    monkeypatch.setattr("pipeline.processing.analysis.models.canonical_glm.FirstLevelModel", lambda **kwargs: None)
+    spec = ModelSpec("canonical_glm", "canonical_glm", {"confounds": ["rot_y"]})
+    context = TaskRunContext(
+        subject="001", task="nback", run="1", bold_path=bold_path,
+        events_path=events_path, confounds_path=confounds_path,
+    )
+
+    with pytest.raises(ValueError, match="missing required columns: rot_y"):
+        CanonicalGLMModel(spec).fit(spec.plan(context, str(tmp_path / "out")))

@@ -142,21 +142,54 @@ class CanonicalGLMModel:
             raise FileNotFoundError("Configured confounds require an existing confounds file.")
 
         confounds = pd.read_csv(context.confounds_path, sep="\t")
-        columns = self._confound_columns(requested, confounds.columns)
-        return confounds.loc[:, columns] if columns else confounds
+        columns, missing = self._confound_columns(requested, confounds.columns)
+        optional = self._requested_names(configuration.get("optional_confounds", ()))
+        missing = [column for column in missing if column not in optional]
+        if missing:
+            raise ValueError(
+                f"Confounds file {context.confounds_path} is missing required columns: "
+                f"{', '.join(missing)}."
+            )
+        selected = [column for column in columns if column in confounds.columns]
+        if not selected:
+            return None
+        result = confounds.loc[:, selected].copy()
+        try:
+            result = result.apply(pd.to_numeric, errors="raise")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Confounds file {context.confounds_path} contains non-numeric required columns."
+            ) from exc
+        if result.isna().any().any():
+            result = result.fillna(0)
+        return result
 
     @staticmethod
-    def _confound_columns(requested: Any, available: pd.Index) -> list[str]:
+    def _confound_columns(requested: Any, available: pd.Index) -> tuple[list[str], list[str]]:
         available_names = [str(column) for column in available]
         if requested is True or requested == "all":
-            return available_names
+            return available_names, []
         if isinstance(requested, Mapping):
             requested = [key for key, enabled in requested.items() if enabled]
         if isinstance(requested, str):
             requested = [requested]
         if not isinstance(requested, (list, tuple, set)):
-            return []
-        return [str(column) for column in requested if str(column) in available_names]
+            return [], []
+        requested_names = [str(column) for column in requested]
+        return (
+            [column for column in requested_names if column in available_names],
+            [column for column in requested_names if column not in available_names],
+        )
+
+    @staticmethod
+    def _requested_names(requested: Any) -> set[str]:
+        if isinstance(requested, str):
+            return {requested}
+        if isinstance(requested, (list, tuple, set)):
+            return {str(column) for column in requested}
+        if isinstance(requested, Mapping):
+            return {str(column) for column, enabled in requested.items() if enabled}
+        return set()
 
     @staticmethod
     def _repetition_time(bold_path: Path, configuration: Mapping[str, Any]) -> float:
