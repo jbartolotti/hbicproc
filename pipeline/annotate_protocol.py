@@ -345,7 +345,7 @@ def save_protocol(data: Dict[str, List[str]], file_path: str) -> None:
     print(f"Backup of original saved to {backup_path}")
 
 
-def annotate_protocol(file_path: str, config_path: Optional[str] = "pipeline_config.json") -> None:
+def annotate_protocol(file_path: str, config_path: Optional[str] = "pipeline_config.yaml") -> None:
     try:
         config = load_config(config_path)
     except FileNotFoundError:
@@ -370,7 +370,7 @@ def main(argv=None) -> int:
     parser.add_argument("file_path", help="Path to Protocol_Translator.json")
     parser.add_argument(
         "--config",
-        default="pipeline_config.json",
+        default="pipeline_config.yaml",
         help="Path to a pipeline config JSON file.",
     )
     args = parser.parse_args(argv)

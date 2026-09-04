@@ -7,7 +7,7 @@ A stage-based pipeline orchestrator for neuroimaging workflows with human checkp
 Stage-based CLI usage:
 
 ```bash
-hbicproc init pipeline_config.json
+hbicproc init pipeline_config.yaml
 hbicproc download sub-001
 hbicproc bidsify sub-001
 hbicproc validate sub-001
@@ -60,9 +60,10 @@ module. The CLI (`pipeline/cli.py`) builds its subcommands directly from the `ST
 
 ## Configuration
 
-Edit `pipeline_config.json` to set your study root, BIDS paths, Singularity images, and exclusions file.
-
-A sample configuration is available at `pipeline_config.sample.json`.
+Copy `pipeline_config.sample.yaml` to `pipeline_config.yaml`, then edit the copy to set your study root,
+BIDS paths, Singularity images, and exclusions file. The sample is the single authoritative template;
+the loader's default filename remains `pipeline_config.yaml` so the working configuration is not confused
+with the template.
 
 ### fMRIPrep configuration
 
@@ -88,7 +89,7 @@ When `freesurfer_mode` is `freesurfer`, `recon-all` is run first and then fMRIPr
 ### XNAT download configuration
 
 The download stage now uses `pyxnat` and downloads data directly from XNAT.
-Set XNAT details in the `xnat` section of `pipeline_config.json`:
+Set XNAT details in the `xnat` section of `pipeline_config.yaml`:
 
 - `xnat.server`: XNAT server URL.
 - `xnat.project_id`: XNAT project identifier.
@@ -128,7 +129,7 @@ session_sic	subject	session
 123456_001_Time2	001	T2
 ```
 
-If you instead have a combined session label such as `011_BL`, set `xnat.session_names_delimiter` to `_` in `pipeline_config.json`.
+If you instead have a combined session label such as `011_BL`, set `xnat.session_names_delimiter` to `_` in `pipeline_config.yaml`.
 
 An example TSV file is included at `pipeline/session_names.example.tsv`.
 
@@ -147,7 +148,7 @@ The QC stage runs participant-level MRIQC and prints the exact next command for 
 
 ## Behavioral events configuration
 
-The `behavior` stage uses the `behavior` section of `pipeline_config.json` to locate E-Prime files, select task parsers, and write BIDS-style events outputs.
+The `behavior` stage uses the `behavior` section of `pipeline_config.yaml` to locate E-Prime files, select task parsers, and write BIDS-style events outputs.
 
 - `behavior.task_configs_dir`: directory containing JSON task configuration files for each supported task. The default example is `code/behavior`.
 - `behavior.parser_plugins_dir`: optional directory containing additional parser plugin modules for custom tasks. Files are loaded automatically when present.

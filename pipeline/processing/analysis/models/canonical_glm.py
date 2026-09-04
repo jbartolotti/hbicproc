@@ -143,8 +143,6 @@ class CanonicalGLMModel:
 
         confounds = pd.read_csv(context.confounds_path, sep="\t")
         columns, missing = self._confound_columns(requested, confounds.columns)
-        optional = self._requested_names(configuration.get("optional_confounds", ()))
-        missing = [column for column in missing if column not in optional]
         if missing:
             raise ValueError(
                 f"Confounds file {context.confounds_path} is missing required columns: "
@@ -170,26 +168,49 @@ class CanonicalGLMModel:
         if requested is True or requested == "all":
             return available_names, []
         if isinstance(requested, Mapping):
-            requested = [key for key, enabled in requested.items() if enabled]
+            expanded: list[str] = []
+            missing: list[str] = []
+            for group, enabled in requested.items():
+                if not enabled:
+                    continue
+                group_name = str(group)
+                if group_name == "columns":
+                    if not isinstance(enabled, (list, tuple, set)):
+                        raise ValueError("The confounds.columns entry must be a list of column names.")
+                    expanded.extend(str(column) for column in enabled)
+                elif group_name == "motion":
+                    expanded.extend([
+                        "trans_x", "trans_y", "trans_z", "rot_x", "rot_y", "rot_z",
+                    ])
+                elif group_name == "motion_derivatives":
+                    expanded.extend([
+                        "trans_x_derivative1", "trans_y_derivative1", "trans_z_derivative1",
+                        "rot_x_derivative1", "rot_y_derivative1", "rot_z_derivative1",
+                    ])
+                elif group_name == "framewise_displacement":
+                    expanded.append(group_name)
+                elif group_name == "acompcor":
+                    if not isinstance(enabled, int) or isinstance(enabled, bool) or enabled < 1:
+                        raise ValueError("The acompcor confound group must be a positive integer.")
+                    acompcor = sorted(column for column in available_names if column.startswith("a_comp_cor_"))
+                    expanded.extend(acompcor[:enabled])
+                    if len(acompcor) < enabled:
+                        missing.extend([f"a_comp_cor_{index:02d}" for index in range(len(acompcor), enabled)])
+                else:
+                    expanded.append(group_name)
+            requested = expanded
+        else:
+            missing = []
         if isinstance(requested, str):
             requested = [requested]
         if not isinstance(requested, (list, tuple, set)):
             return [], []
-        requested_names = [str(column) for column in requested]
+        requested_names = list(dict.fromkeys(str(column) for column in requested))
+        available_set = set(available_names)
         return (
-            [column for column in requested_names if column in available_names],
-            [column for column in requested_names if column not in available_names],
+            [column for column in requested_names if column in available_set],
+            missing + [column for column in requested_names if column not in available_set],
         )
-
-    @staticmethod
-    def _requested_names(requested: Any) -> set[str]:
-        if isinstance(requested, str):
-            return {requested}
-        if isinstance(requested, (list, tuple, set)):
-            return {str(column) for column in requested}
-        if isinstance(requested, Mapping):
-            return {str(column) for column, enabled in requested.items() if enabled}
-        return set()
 
     @staticmethod
     def _repetition_time(bold_path: Path, configuration: Mapping[str, Any]) -> float:

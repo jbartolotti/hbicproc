@@ -1,8 +1,9 @@
-import json
 from pathlib import Path
 
+import yaml
 
-def load_config(path="pipeline_config.json"):
+
+def load_config(path="pipeline_config.yaml"):
     config_path = Path(path)
     if not config_path.exists():
         candidate = Path.cwd() / "code" / config_path.name
@@ -12,7 +13,9 @@ def load_config(path="pipeline_config.json"):
             raise FileNotFoundError(f"Config file not found: {path}")
 
     with config_path.open("r", encoding="utf-8") as handle:
-        config = json.load(handle)
+        config = yaml.safe_load(handle)
+    if config is None:
+        config = {}
 
     config_dir = config_path.parent
     config = _apply_defaults(config)
@@ -21,13 +24,12 @@ def load_config(path="pipeline_config.json"):
     return config
 
 
-def save_default_config(path="pipeline_config.json"):
+def save_default_config(path="pipeline_config.yaml"):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     config = _apply_defaults({})
     with path.open("w", encoding="utf-8") as handle:
-        json.dump(config, handle, indent=2)
-        handle.write("\n")
+        yaml.safe_dump(config, handle, sort_keys=False, allow_unicode=True)
 
 
 def load_default_config(root_dir="."):

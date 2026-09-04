@@ -1,0 +1,134 @@
+# hbicproc configuration template.
+# Copy this file to pipeline_config.yaml and edit the copy for your study.
+# Values shown are examples or package defaults.
+
+study_root: .                 # Study root. Default: current configuration directory.
+code_dir: code                 # Study-specific scripts and behavior configuration.
+email: ""                     # Optional notification email. Default: empty.
+log_dir: ""                   # Log directory. Empty uses <study_root>/logs.
+
+tokens:
+  # Filename tokens used by BIDS conversion when classifying scans.
+  anat: [mprage, t1, t2, anat, mpr, sag, t1w, t2w]
+  func: [bold, fmri, rest, nback, flanker, task, functional, sbref]
+  fmap: [fieldmap, field_map, fmap, phase, phasediff, magnitude, ap, pa]
+  dwi: [dwi, diff, dtifit, dti]
+
+xnat:
+  # Replace the example server, project, and credentials before using download.
+  # session_names.tsv may be one of the following:
+  #   - A conversion mapping from XNAT session names as written to subject and session. 
+  #     Example: session_sic           subject session
+  #              123456_mystudy_001_BL 001     baseline
+  #   - A single standardized session column that can be converted to subject and session using the optional session_names_delimiter.
+  #     Example: session
+  #              001_baseline
+  server: https://xnat.example.org
+  project_id: MY_PROJECT
+  credentials_file: code/xnat_credentials.json
+  session_names_file: "code/session_names.tsv" 
+  session_names_delimiter: 
+  verbose: false
+  output_dir: sourcedata
+  verify_ssl: true
+
+bidskit:
+  # BIDS conversion input/output. Defaults: sourcedata and work/bidskit.
+  input_dir: sourcedata
+  output_dir: work/bidskit
+  extra_args: ""
+
+mriqc:
+  # MRIQC container and outputs. Defaults use the latest image in participant mode.
+  singularity_image: docker://poldracklab/mriqc:latest #Or, use a local image file path e.g. /path/to/mriqc.sif
+  output_dir: derivatives/mriqc
+  work_dir: work/mriqc
+  extra_args: participant --participant_label {subject}
+
+fmriprep:
+  # fMRIPrep and optional surface-processing settings.
+  # Defaults use the latest fMRIPrep image and integrated FreeSurfer.
+  fmriprep_image: docker://poldracklab/fmriprep:latest # Or, use a local image file path e.g. /path/to/fmriprep.sif
+  fastsurfer_image: /path/to/fastsurfer.sif
+  freesurfer_image: ""
+  output_dir: derivatives/fmriprep
+  work_dir: work/fmriprep
+  fs_license_file: /path/to/license.txt
+  extra_args: participant --participant_label {subject}
+  use_slurm: false
+  # freesurfer_mode can be one of the following. Default behavior is 'integrated'.
+  #  - integrated: run FreeSurfer within fMRIPrep. Passes --fs-license-file to fMRIPrep
+  #  - reuse, freesurfer, or fastsurfer: passes --fs-no-reconall, --fs-no-resume, and --fs-subjects-dir (freesurfer_subjects_dir) to fMRIPrep.
+  #  - none: skip FreeSurfer processing. Uses --fs-no-reconall in fMRIPrep.
+  freesurfer_mode: integrated 
+  freesurfer_subjects_dir: derivatives/sourcedata/freesurfer # Only specify if you precomputed FreeSurfer outputs and want to reuse them in fmriprep. Default behavior fMRIPrep 
+  precompute_session: ""
+  slurm:
+    # SLURM defaults apply only when use_slurm is true.
+    partition: sixhour
+    cpus_per_task: 6
+    mem: 24G
+    precompute_cpus_per_task: 4
+    precompute_mem: 12G
+    precompute_time: 03:00:00
+    time_fmriprep: 06:00:00
+    time_fastsurfer: 03:00:00
+    gpu_type: a100|l40|a40|q6000|q8000 # for fastsurfer execution only.
+
+hbicproc:
+  # Pipeline state and exclusion settings.
+  exclusions_file: derivatives/hbicproc/exclusions.json
+
+analysis:
+  # Task-centered analysis settings.
+  # The global input_dataset is inherited unless a task overrides it.
+  output_dir: derivatives/hbicproc
+  input_dataset:
+    name: fmriprep
+    path: derivatives/fmriprep
+  subject:
+    # Configured tasks and analyses default to enabled.
+    tasks:
+      nback:
+        enabled: true
+        models:
+          canonical_glm:
+            type: canonical_glm
+            t_r: 2.0
+            smoothing_fwhm: 6.0
+            high_pass: 0.01
+            drift_model: cosine
+            hrf_model: spm
+            conditions: [oneback, twoback]
+            # Confound groups expand to the corresponding fMRIPrep columns.
+            # Every expanded column is required; missing columns stop fitting.
+            confounds:
+              # Add any explicitly named confound columns here.
+              columns: []
+              motion: true
+              motion_derivatives: true
+              framewise_displacement: true
+              acompcor: 5
+        analyses:
+          activation:
+            enabled: true
+            model: canonical_glm
+            contrasts:
+              2back_gt_1back: twoback - oneback
+              2back_gt_baseline: twoback
+              1back_gt_baseline: oneback
+            output_types: [effect_size, z_score]
+            atlases: [schaefer200, schaefer400]
+            # Empty uses the external ~/.cache/hbicproc/atlases cache.
+            atlas_cache_dir: ""
+
+behavior:
+  # Behavioral event extraction. Default: disabled.
+  enabled: false
+  tasks: []
+  task_configs_dir: code/behavior
+  parser_plugins_dir: code/behavior/plugins
+  edat3_search_root: sourcedata
+  output_dir: derivatives/behavior/events
+  reader_backend: auto
+  verbose: false

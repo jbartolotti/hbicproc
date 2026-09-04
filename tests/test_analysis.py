@@ -1,10 +1,10 @@
-import json
 from pathlib import Path
 
 import numpy as np
 import nibabel as nib
 import pandas as pd
 import pytest
+import yaml
 
 from pipeline.cli import _build_parser
 from pipeline.config import load_config, load_default_config
@@ -33,9 +33,9 @@ def test_analysis_section_uses_task_centered_defaults() -> None:
 
 
 def test_configured_tasks_default_to_enabled_and_resolve_dataset_paths(tmp_path: Path) -> None:
-    config_path = tmp_path / "pipeline_config.json"
+    config_path = tmp_path / "pipeline_config.yaml"
     config_path.write_text(
-        json.dumps(
+        yaml.safe_dump(
             {
                 "study_root": ".",
                 "analysis": {
@@ -55,7 +55,8 @@ def test_configured_tasks_default_to_enabled_and_resolve_dataset_paths(tmp_path:
                         }
                     },
                 },
-            }
+            },
+            sort_keys=False,
         ),
         encoding="utf-8",
     )
@@ -69,9 +70,9 @@ def test_configured_tasks_default_to_enabled_and_resolve_dataset_paths(tmp_path:
 
 
 def test_old_activation_configuration_is_rejected(tmp_path: Path) -> None:
-    config_path = tmp_path / "pipeline_config.json"
+    config_path = tmp_path / "pipeline_config.yaml"
     config_path.write_text(
-        json.dumps({"analysis": {"subject": {"activation": {"enabled": True}}}}),
+        yaml.safe_dump({"analysis": {"subject": {"activation": {"enabled": True}}}}, sort_keys=False),
         encoding="utf-8",
     )
 
@@ -299,6 +300,35 @@ def test_canonical_glm_rejects_missing_required_confounds(tmp_path: Path, monkey
 
     with pytest.raises(ValueError, match="missing required columns: rot_y"):
         CanonicalGLMModel(spec).fit(spec.plan(context, str(tmp_path / "out")))
+
+
+def test_canonical_glm_expands_fmriprep_confound_groups() -> None:
+    available = pd.Index([
+        "trans_x", "trans_y", "trans_z", "rot_x", "rot_y", "rot_z",
+        "trans_x_derivative1", "trans_y_derivative1", "trans_z_derivative1",
+        "rot_x_derivative1", "rot_y_derivative1", "rot_z_derivative1",
+        "framewise_displacement", "a_comp_cor_00", "a_comp_cor_01",
+    ])
+
+    columns, missing = CanonicalGLMModel._confound_columns(
+        {"motion": True, "motion_derivatives": True, "framewise_displacement": True, "acompcor": 2},
+        available,
+    )
+
+    assert columns == list(available)
+    assert missing == []
+
+
+def test_canonical_glm_includes_explicit_confound_columns() -> None:
+    columns, missing = CanonicalGLMModel._confound_columns(
+        {"columns": ["csf", "white_matter"], "motion": True},
+        pd.Index(["csf", "white_matter", "trans_x", "trans_y", "trans_z", "rot_x", "rot_y", "rot_z"]),
+    )
+
+    assert columns == [
+        "csf", "white_matter", "trans_x", "trans_y", "trans_z", "rot_x", "rot_y", "rot_z",
+    ]
+    assert missing == []
 
 
 def test_atlas_cache_fetches_once_and_resamples_outside_bids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

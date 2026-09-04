@@ -177,7 +177,7 @@ def _build_parser():
     parser = argparse.ArgumentParser(description="hbicproc stage-based pipeline CLI")
     parser.add_argument(
         "--config",
-        default="pipeline_config.json",
+        default="pipeline_config.yaml",
         help="Path to the pipeline config file.",
     )
     parser.add_argument(

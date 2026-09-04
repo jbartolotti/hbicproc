@@ -3,7 +3,7 @@ name = "hbicproc-pipeline"
 version = "0.1.0"
 description = "Minimal fMRI preprocessing workflow orchestrator."
 requires-python = ">=3.10"
-dependencies = ["questionary>=1.0", "pyxnat>=1.6", "nibabel", "pandas", "bidskit", "bids", "pybids>=0.22.0", "nilearn", "matplotlib>=3.5"]
+dependencies = ["questionary>=1.0", "pyxnat>=1.6", "nibabel", "pandas", "bidskit", "bids", "pybids>=0.22.0", "nilearn", "matplotlib>=3.5", "PyYAML"]
 
 [build-system]
 requires = ["setuptools>=61"]
