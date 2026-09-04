@@ -4,6 +4,8 @@ from pathlib import Path
 from .core.paths import get_bids_root
 
 SUMMARY_FILE_NAME = "pipeline_summary.json"
+PIPELINE_STATE_FILE_NAME = "pipeline_state.json"
+PYBIDS_CACHE_DIR = Path("code") / "cache" / "pybids"
 DEFAULT_STATE = {
     "downloaded": False,
     "bidsified": False,
@@ -12,6 +14,54 @@ DEFAULT_STATE = {
     "qc_reviewed": False,
     "preprocessed": False,
 }
+
+
+def pipeline_state_file(study_root="."):
+    return Path(study_root) / "code" / "cache" / PIPELINE_STATE_FILE_NAME
+
+
+def load_pipeline_state(study_root="."):
+    path = pipeline_state_file(study_root)
+    if not path.exists():
+        return {"bids_indexes": {}}
+
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError, TypeError):
+        return {"bids_indexes": {}}
+
+    if not isinstance(data, dict):
+        return {"bids_indexes": {}}
+    indexes = data.get("bids_indexes")
+    if not isinstance(indexes, dict):
+        data["bids_indexes"] = {}
+    return data
+
+
+def save_pipeline_state(study_root, state):
+    path = pipeline_state_file(study_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(state, handle, indent=2)
+        handle.write("\n")
+
+
+def invalidate_bids_index(index_name, study_root="."):
+    index_name = str(index_name).strip()
+    if not index_name:
+        raise ValueError("index_name must not be empty.")
+
+    state = load_pipeline_state(study_root)
+    indexes = state.setdefault("bids_indexes", {})
+    current_revision = indexes.get(index_name, 0)
+    try:
+        current_revision = int(current_revision)
+    except (TypeError, ValueError):
+        current_revision = 0
+    indexes[index_name] = current_revision + 1
+    save_pipeline_state(study_root, state)
+    return indexes[index_name]
 
 
 def summary_file(config):

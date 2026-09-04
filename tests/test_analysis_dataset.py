@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
 
 from pipeline.processing.analysis import InputDataset, TaskRunContext
 from pipeline.processing.analysis.dataset import DatasetIndex
+from pipeline.state import invalidate_bids_index
 from pipeline.processing.analysis.derivatives import DerivativePathBuilder
 
 
@@ -93,6 +96,54 @@ def test_dataset_index_supports_task_specific_input_dataset(tmp_path: Path) -> N
     )
 
     assert [(run.subject, run.task, run.input_dataset.name) for run in runs] == [("008", "nback", "afni")]
+
+
+def test_pybids_index_cache_creation_reuse_and_invalidation(
+    tmp_path: Path,
+    caplog,
+) -> None:
+    bids_root = tmp_path / "bids"
+    derivative_root = bids_root / "derivatives" / "fmriprep"
+    bids_root.mkdir(parents=True)
+    derivative_root.mkdir(parents=True)
+    (bids_root / "dataset_description.json").write_text(
+        '{"Name": "Test dataset", "BIDSVersion": "1.8.0"}', encoding="utf-8"
+    )
+    (derivative_root / "dataset_description.json").write_text(
+        '{"Name": "fMRIPrep", "BIDSVersion": "1.8.0"}', encoding="utf-8"
+    )
+    config = {
+        "bids_root": str(bids_root),
+        "study_root": str(tmp_path),
+        "analysis": {
+            "input_dataset": {"name": "fmriprep", "path": str(derivative_root)},
+        },
+    }
+
+    caplog.set_level(logging.INFO)
+    DatasetIndex.from_config(config)
+    cache_dir = bids_root / "code" / "cache" / "pybids"
+    state_path = bids_root / "code" / "cache" / "pipeline_state.json"
+    assert cache_dir.exists()
+    assert state_path.exists()
+    assert {path.name.split("-", 1)[0] for path in cache_dir.glob("*.json")} == {"raw", "fmriprep"}
+    assert json.loads(state_path.read_text(encoding="utf-8"))["bids_indexes"] == {
+        "raw": 0,
+        "fmriprep": 0,
+    }
+
+    caplog.clear()
+    DatasetIndex.from_config(config)
+    assert "Using cached PyBIDS index raw" in caplog.text
+    assert "Using cached PyBIDS index fmriprep" in caplog.text
+
+    assert invalidate_bids_index("fmriprep", bids_root) == 1
+    caplog.clear()
+    DatasetIndex.from_config(config)
+    assert "PyBIDS cache stale, rebuilding fmriprep" in caplog.text
+    assert "Using cached PyBIDS index raw" in caplog.text
+    metadata = next(cache_dir.glob("fmriprep-*.json"))
+    assert json.loads(metadata.read_text(encoding="utf-8"))["revision"] == 1
 
 
 def test_derivative_path_builder_separates_model_and_analysis_namespaces(tmp_path: Path) -> None:

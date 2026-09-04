@@ -1,5 +1,7 @@
 from .base import BaseStage, StageResult
 from ..processing.preprocess.service import run as preprocess_run
+from ..core.paths import get_bids_root
+from ..state import invalidate_bids_index
 
 
 class PreprocessStage(BaseStage):
@@ -8,6 +10,8 @@ class PreprocessStage(BaseStage):
 
     def run(self, subject, config, state, dry_run=False, rerun=False):
         result = preprocess_run(subject, config, dry_run=dry_run, rerun=rerun)
+        if result.get("success", False) and not dry_run:
+            invalidate_bids_index("fmriprep", get_bids_root(config))
 
         reserved = ("success", "skipped", "message", "next_command")
         details = {key: value for key, value in result.items() if key not in reserved}

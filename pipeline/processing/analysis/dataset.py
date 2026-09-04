@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
 from bids import BIDSLayout, BIDSLayoutIndexer
 
+from ...core.paths import get_bids_root
 from .context import InputDataset, TaskRunContext
+from ...state import invalidate_bids_index, load_pipeline_state, pipeline_state_file, save_pipeline_state
 
 logger = logging.getLogger(__name__)
 
@@ -78,11 +82,11 @@ class DatasetIndex:
         )
         if self.bids_root.exists():
             try:
-                self.layout = BIDSLayout(
-                    str(self.bids_root),
-                    validate=False,
+                self.layout = self._build_cached_layout(
+                    self.bids_root,
+                    index_name="raw",
                     derivatives=False,
-                    indexer=BIDSLayoutIndexer(validate=False),
+                    is_derivative=False,
                 )
             except Exception:
                 self.layout = None
@@ -155,7 +159,7 @@ class DatasetIndex:
             return list(cached_runs)
 
         derivative_root = selected_root
-        derivative_layout = self._get_derivative_layout(derivative_root)
+        derivative_layout = self._get_derivative_layout(derivative_root, selected_dataset.name)
 
         if self.layout is None or derivative_layout is None:
             logger.info(
@@ -306,24 +310,104 @@ class DatasetIndex:
         self._task_runs_cache[cache_key] = resolved_runs
         return list(resolved_runs)
 
-    def _get_derivative_layout(self, derivative_root: Path) -> BIDSLayout | None:
+    def _get_derivative_layout(self, derivative_root: Path, index_name: str | None = None) -> BIDSLayout | None:
         if derivative_root not in self._derivative_layouts:
-            self._derivative_layouts[derivative_root] = self._build_derivative_layout(derivative_root)
+            self._derivative_layouts[derivative_root] = self._build_derivative_layout(
+                derivative_root,
+                index_name=index_name or self.input_dataset.name,
+            )
         return self._derivative_layouts[derivative_root]
 
-    def _build_derivative_layout(self, derivative_root: Path) -> BIDSLayout | None:
+    def _build_derivative_layout(
+        self,
+        derivative_root: Path,
+        *,
+        index_name: str | None = None,
+    ) -> BIDSLayout | None:
         if not derivative_root.exists():
             return None
         try:
-            return BIDSLayout(
-                str(derivative_root),
-                validate=False,
+            return self._build_cached_layout(
+                derivative_root,
+                index_name=index_name or self.input_dataset.name,
                 derivatives=False,
                 is_derivative=True,
-                indexer=BIDSLayoutIndexer(validate=False),
             )
         except Exception:
             return None
+
+    def _build_cached_layout(
+        self,
+        root: Path,
+        *,
+        index_name: str,
+        derivatives: bool,
+        is_derivative: bool,
+    ) -> BIDSLayout:
+        cache_dir = self.bids_root / "code" / "cache" / "pybids"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        identity = json.dumps(
+            {"name": index_name, "path": str(root.resolve())},
+            sort_keys=True,
+        ).encode("utf-8")
+        identity_hash = hashlib.sha256(identity).hexdigest()[:16]
+        safe_name = "".join(character if character.isalnum() or character in "-_" else "_" for character in index_name)
+        database_path = cache_dir / f"{safe_name}-{identity_hash}"
+        metadata_path = cache_dir / f"{safe_name}-{identity_hash}.json"
+        state_path = pipeline_state_file(self.bids_root)
+        state = load_pipeline_state(self.bids_root)
+        current_revision = state.get("bids_indexes", {}).get(index_name, 0)
+        try:
+            current_revision = int(current_revision)
+        except (TypeError, ValueError):
+            current_revision = 0
+
+        cached_revision = None
+        if state_path.exists() and database_path.exists() and metadata_path.exists():
+            try:
+                with metadata_path.open("r", encoding="utf-8") as handle:
+                    metadata = json.load(handle)
+                cached_revision = int(metadata.get("revision"))
+            except (OSError, ValueError, TypeError):
+                cached_revision = None
+
+        layout_kwargs = {
+            "validate": False,
+            "derivatives": derivatives,
+            "is_derivative": is_derivative,
+            "indexer": BIDSLayoutIndexer(validate=False),
+            "database_path": str(database_path),
+        }
+        if cached_revision == current_revision:
+            logger.info(
+                "Using cached PyBIDS index %s (revision=%d, database=%s)",
+                index_name,
+                current_revision,
+                database_path,
+            )
+            return BIDSLayout(str(root), **layout_kwargs)
+
+        if database_path.exists():
+            logger.info(
+                "PyBIDS cache stale, rebuilding %s (cached_revision=%s current_revision=%d)",
+                index_name,
+                cached_revision,
+                current_revision,
+            )
+        else:
+            logger.info("Created new PyBIDS cache %s (revision=%d)", index_name, current_revision)
+        layout_kwargs["reset_database"] = True
+        layout = BIDSLayout(str(root), **layout_kwargs)
+        with metadata_path.open("w", encoding="utf-8") as handle:
+            json.dump(
+                {"index_name": index_name, "revision": current_revision, "identity": identity.decode("utf-8")},
+                handle,
+                indent=2,
+            )
+            handle.write("\n")
+        state.setdefault("bids_indexes", {})[index_name] = current_revision
+        save_pipeline_state(self.bids_root, state)
+        return layout
 
     def _query(self, layout: BIDSLayout | None, **filters: Any) -> list[Any]:
         if layout is None:
@@ -479,7 +563,51 @@ def get_dataset_index(config: dict[str, Any]) -> DatasetIndex:
     return DatasetIndex.from_config(config)
 
 
+def regenerate_cached_indexes(config: dict[str, Any]) -> None:
+    """Rebuild the raw and configured derivative PyBIDS indexes."""
+
+    bids_root = get_bids_root(config)
+    datasets: dict[tuple[str, str], dict[str, str]] = {}
+    cache_dir = bids_root / "code" / "cache" / "pybids"
+    for metadata_path in cache_dir.glob("*.json"):
+        try:
+            with metadata_path.open("r", encoding="utf-8") as handle:
+                metadata = json.load(handle)
+            identity = json.loads(metadata.get("identity", "{}"))
+            name = str(metadata.get("index_name", "")).strip()
+            path = str(identity.get("path", "")).strip()
+            if name and name != "raw" and path:
+                datasets[(name, path)] = {"name": name, "path": path}
+        except (OSError, TypeError, ValueError):
+            continue
+
+    analysis = config.get("analysis", {})
+    if isinstance(analysis, dict):
+        global_dataset = analysis.get("input_dataset")
+        if isinstance(global_dataset, dict):
+            datasets[(str(global_dataset.get("name", "")), str(global_dataset.get("path", "")))] = global_dataset
+        subject = analysis.get("subject", {})
+        tasks = subject.get("tasks", {}) if isinstance(subject, dict) else {}
+        if isinstance(tasks, dict):
+            for task_config in tasks.values():
+                if not isinstance(task_config, dict):
+                    continue
+                dataset = task_config.get("input_dataset")
+                if isinstance(dataset, dict):
+                    datasets[(str(dataset.get("name", "")), str(dataset.get("path", "")))] = dataset
+
+    invalidate_bids_index("raw", bids_root)
+    for name, _path in datasets:
+        if name:
+            invalidate_bids_index(name, bids_root)
+
+    DatasetIndex.from_config(config)
+    for dataset in datasets.values():
+        DatasetIndex.from_config(config, task_config={"input_dataset": dataset})
+
+
 __all__ = [
     "DatasetIndex",
     "get_dataset_index",
+    "regenerate_cached_indexes",
 ]
