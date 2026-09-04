@@ -8,9 +8,11 @@ from typing import Any, Mapping
 import nibabel as nib
 from nibabel.dft import logger
 import pandas as pd
+import matplotlib.pyplot as plt
 from nilearn.glm.first_level import FirstLevelModel
 
 from ..context import TaskRunContext
+from ..derivatives import DerivativePathBuilder
 from .base import ModelPlan, ModelSpec
 
 
@@ -91,7 +93,7 @@ class CanonicalGLMModel:
         if output_dir is None:
             raise ValueError("Canonical GLM model plan has no model derivative directory.")
         output_dir.mkdir(parents=True, exist_ok=True)
-        metadata_path = output_dir / "model_metadata.json"
+        metadata_path = self._model_file(fitted, desc="model-metadata", suffix=".json")
         metadata = {
             "model": self.spec.name,
             "model_type": self.spec.model_type,
@@ -109,9 +111,167 @@ class CanonicalGLMModel:
         if output_dir is None:
             raise ValueError("Canonical GLM model plan has no model derivative directory.")
         output_dir.mkdir(parents=True, exist_ok=True)
-        design_matrix_path = output_dir / "design_matrix.tsv"
+        design_matrix_path = self._model_file(fitted, desc="design-matrix", suffix=".tsv")
         fitted.estimator.design_matrices_[0].to_csv(design_matrix_path, sep="\t", index=False)
         return design_matrix_path
+
+    def write_derivatives(self, fitted: FittedModel) -> dict[str, list[str]]:
+        """Write portable first-level products while the fitted model is in memory."""
+
+        output_dir = fitted.plan.derivatives.model_directory
+        if output_dir is None:
+            raise ValueError("Canonical GLM model plan has no model derivative directory.")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        context = fitted.plan.context
+        derivatives: dict[str, list[str]] = {}
+
+        derivatives["design_matrix"] = [str(self.write_design_matrix(fitted))]
+        design_png = self._model_file(
+            fitted,
+            subject=context.subject,
+            session=context.session,
+            task=context.task,
+            run=context.run,
+            desc="design-matrix",
+            suffix=".png",
+        )
+        design_png.parent.mkdir(parents=True, exist_ok=True)
+        figure = fitted.estimator.design_matrices_[0].T
+        plt.figure(figsize=(max(8, figure.shape[1] / 8), max(4, figure.shape[0] / 2)))
+        plt.imshow(figure, aspect="auto", interpolation="nearest", cmap="viridis")
+        plt.yticks(range(len(figure.index)), figure.index)
+        plt.xlabel("Scan")
+        plt.tight_layout()
+        plt.savefig(design_png, dpi=150)
+        plt.close()
+        derivatives["design_matrix_png"] = [str(design_png)]
+
+        mask_img = getattr(fitted.estimator, "mask_img_", None)
+        if mask_img is not None:
+            mask_path = self._model_file(
+                fitted,
+                subject=context.subject,
+                session=context.session,
+                task=context.task,
+                run=context.run,
+                desc="mask",
+            )
+            mask_img.to_filename(mask_path)
+            derivatives["mask"] = [str(mask_path)]
+
+        conditions = self.spec.configuration.get("conditions", ())
+        if isinstance(conditions, str):
+            conditions = [conditions]
+        if isinstance(conditions, (list, tuple, set)):
+            condition_paths = []
+            for condition in conditions:
+                condition_name = str(condition).strip()
+                if not condition_name:
+                    continue
+                image = fitted.estimator.compute_contrast(condition_name, output_type="effect_size")
+                condition_path = self._model_file(
+                    fitted,
+                    subject=context.subject,
+                    session=context.session,
+                    task=context.task,
+                    run=context.run,
+                    desc=condition_name,
+                    stat="effect",
+                )
+                image.to_filename(condition_path)
+                condition_paths.append(str(condition_path))
+            if condition_paths:
+                derivatives["condition_effects"] = condition_paths
+
+        residuals = getattr(fitted.estimator, "residuals_", None)
+        if residuals is None:
+            residuals = getattr(fitted.estimator, "residuals", None)
+        residual_paths = []
+        if isinstance(residuals, (list, tuple)):
+            for index, image in enumerate(residuals, start=1):
+                if image is None or not hasattr(image, "to_filename"):
+                    continue
+                residual_path = self._model_file(
+                    fitted,
+                    subject=context.subject,
+                    session=context.session,
+                    task=context.task,
+                    run=context.run,
+                    desc=f"residual-{index:02d}",
+                )
+                image.to_filename(residual_path)
+                residual_paths.append(str(residual_path))
+        if residual_paths:
+            derivatives["residuals"] = residual_paths
+
+        if fitted.confounds is not None:
+            motion_path = self._model_file(
+                fitted,
+                subject=context.subject,
+                session=context.session,
+                task=context.task,
+                run=context.run,
+                desc="motion-qc",
+                suffix=".tsv",
+            )
+            fitted.confounds.to_csv(motion_path, sep="\t", index=False)
+            summary_path = self._model_file(
+                fitted,
+                subject=context.subject,
+                session=context.session,
+                task=context.task,
+                run=context.run,
+                desc="motion-qc-summary",
+                suffix=".json",
+            )
+            summary = {
+                "columns": list(fitted.confounds.columns),
+                "rows": int(len(fitted.confounds)),
+                "mean": fitted.confounds.mean().to_dict(),
+                "std": fitted.confounds.std().to_dict(),
+                "maximum": fitted.confounds.max().to_dict(),
+            }
+            summary_path.write_text(json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8")
+            derivatives["motion_qc"] = [str(summary_path), str(motion_path)]
+
+        generate_report = getattr(fitted.estimator, "generate_report", None)
+        if callable(generate_report):
+            report = generate_report()
+            report_path = self._model_file(
+                fitted,
+                subject=context.subject,
+                session=context.session,
+                task=context.task,
+                run=context.run,
+                desc="first-level-report",
+                suffix=".html",
+            )
+            report.save_as_html(str(report_path))
+            derivatives["report"] = [str(report_path)]
+        return derivatives
+
+    def _model_file(
+        self,
+        fitted: FittedModel,
+        *,
+        desc: str,
+        stat: str | None = None,
+        suffix: str = ".nii.gz",
+        **_: Any,
+    ) -> Path:
+        output_dir = fitted.plan.derivatives.model_directory
+        if output_dir is None:
+            raise ValueError("Canonical GLM model plan has no model derivative directory.")
+        context = fitted.plan.context
+        return output_dir / DerivativePathBuilder.build_filename(
+            subject=context.subject,
+            session=context.session,
+            task=context.task,
+            run=context.run,
+            desc=desc,
+            stat=stat,
+            suffix=suffix,
+        )
 
     def _load_confounds(self, context: TaskRunContext) -> pd.DataFrame | None:
         configuration = self.spec.configuration

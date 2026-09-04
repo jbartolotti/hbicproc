@@ -143,6 +143,6 @@ def test_derivative_builder_normalizes_bids_entities() -> None:
         / "run-2"
         / "models"
         / "canonical_glm"
-        / "condition_a_effect.nii.gz"
+        / "sub-001_ses-baseline_task-rest_run-2_desc-condition-a_stat-effect.nii.gz"
     )
     assert path == expected

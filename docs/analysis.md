@@ -72,8 +72,8 @@ derivatives/hbicproc/
           run-1/
             models/
               canonical_glm/
-                model_metadata.json
-                design_matrix.tsv
+                sub-001_ses-01_task-nback_run-1_desc-model-metadata.json
+                sub-001_ses-01_task-nback_run-1_desc-design-matrix.tsv
             analyses/
               activation/
                 contrast-2back_gt_1back_stat-effect_size.nii.gz

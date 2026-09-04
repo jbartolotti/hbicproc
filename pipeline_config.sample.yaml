@@ -117,7 +117,7 @@ analysis:
               2back_gt_1back: twoback - oneback
               2back_gt_baseline: twoback
               1back_gt_baseline: oneback
-            output_types: [effect_size, z_score]
+            output_types: [effect_size, variance, z_score]
             atlases: [schaefer200, schaefer400]
             # Empty uses the external ~/.cache/hbicproc/atlases cache.
             atlas_cache_dir: ""

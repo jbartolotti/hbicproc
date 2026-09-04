@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..models.canonical_glm import FittedModel
+from ..derivatives import DerivativePathBuilder
 from .atlas import AtlasCache
 from .base import AnalysisPlan
 
@@ -58,7 +59,14 @@ class ActivationAnalysis:
                     output_type=output_type,
                 )
                 target_image = image
-                path = output_dir / f"contrast-{self._component(name)}_stat-{self._component(output_type)}.nii.gz"
+                path = output_dir / DerivativePathBuilder.build_filename(
+                    subject=fitted.plan.context.subject,
+                    session=fitted.plan.context.session,
+                    task=fitted.plan.context.task,
+                    run=fitted.plan.context.run,
+                    desc=self._component(name),
+                    stat=self._stat_component(output_type),
+                )
                 image.to_filename(path)
                 outputs.append(ContrastOutput(name, output_type, path))
         atlas_names = plan.spec.configuration.get("atlases", fitted.plan.spec.configuration.get("atlases", ()))
@@ -66,11 +74,54 @@ class ActivationAnalysis:
             atlas_names = [atlas_names]
         if target_image is not None and isinstance(atlas_names, (list, tuple, set)):
             cache = AtlasCache(plan.spec.configuration.get("atlas_cache_dir"))
+            conditions = fitted.plan.spec.configuration.get("conditions", ())
+            if isinstance(conditions, str):
+                conditions = [conditions]
+            condition_images = {}
+            if isinstance(conditions, (list, tuple, set)):
+                condition_images = {
+                    str(condition): fitted.estimator.compute_contrast(str(condition), output_type="effect_size")
+                    for condition in conditions
+                    if str(condition).strip()
+                }
+            residuals = getattr(fitted.estimator, "residuals_", None)
+            if residuals is None:
+                residuals = getattr(fitted.estimator, "residuals", None)
+            if not isinstance(residuals, (list, tuple)):
+                residuals = []
             for atlas_name in atlas_names:
                 atlas_text = self._component(str(atlas_name))
-                path = output_dir / f"atlas-{atlas_text}_resampled.nii.gz"
+                path = output_dir / DerivativePathBuilder.build_filename(
+                    subject=fitted.plan.context.subject,
+                    session=fitted.plan.context.session,
+                    task=fitted.plan.context.task,
+                    run=fitted.plan.context.run,
+                    desc=f"atlas-{atlas_text}-resampled",
+                )
                 cache.resample(str(atlas_name), target_image, path)
                 outputs.append(AtlasOutput(str(atlas_name), path))
+                if condition_images:
+                    activation_path = output_dir / DerivativePathBuilder.build_filename(
+                        subject=fitted.plan.context.subject,
+                        session=fitted.plan.context.session,
+                        task=fitted.plan.context.task,
+                        run=fitted.plan.context.run,
+                        desc=f"atlas-{atlas_text}-activation",
+                        suffix=".tsv",
+                    )
+                    cache.roi_activation_summary(str(atlas_name), condition_images, target_image, activation_path)
+                    outputs.append(AtlasOutput(f"{atlas_name}:activation", activation_path))
+                if residuals:
+                    residual_path = output_dir / DerivativePathBuilder.build_filename(
+                        subject=fitted.plan.context.subject,
+                        session=fitted.plan.context.session,
+                        task=fitted.plan.context.task,
+                        run=fitted.plan.context.run,
+                        desc=f"atlas-{atlas_text}-residuals",
+                        suffix=".tsv",
+                    )
+                    cache.roi_residual_timeseries(str(atlas_name), list(residuals), target_image, residual_path)
+                    outputs.append(AtlasOutput(f"{atlas_name}:residuals", residual_path))
         return tuple(outputs)
 
     @staticmethod
@@ -90,7 +141,7 @@ class ActivationAnalysis:
     @staticmethod
     def _output_types(value: Any) -> tuple[str, ...]:
         if value is None:
-            return ("effect_size", "z_score")
+            return ("effect_size", "variance", "z_score")
         if isinstance(value, str):
             value = [value]
         if not isinstance(value, (list, tuple, set)):
@@ -108,6 +159,14 @@ class ActivationAnalysis:
         if not text or text in {".", ".."} or "/" in text or "\\" in text:
             raise ValueError(f"Activation output components must be single path components: {value!r}.")
         return text.replace(" ", "-")
+
+    @staticmethod
+    def _stat_component(value: str) -> str:
+        return {
+            "effect_size": "effect",
+            "z_score": "z",
+            "variance": "variance",
+        }.get(value, value.replace("_", "-"))
 
 
 __all__ = ["ActivationAnalysis", "AtlasOutput", "ContrastOutput"]

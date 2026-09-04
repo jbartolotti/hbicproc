@@ -32,6 +32,11 @@ def _normalize_namespace(value: str, *, kind: str) -> str:
     return text
 
 
+def _normalize_bids_component(value: str, *, kind: str) -> str:
+    text = _normalize_namespace(value, kind=kind)
+    return text.replace("_", "-").replace(" ", "-")
+
+
 @dataclass(frozen=True)
 class DerivativePaths:
     """Task/run namespace with isolated model and analysis directories."""
@@ -179,13 +184,45 @@ class DerivativePathBuilder:
         else:
             raise ValueError(f"Unknown derivative namespace: {namespace!r}.")
 
-        tokens = [_normalize_namespace(desc, kind="Description")] if desc else []
+        return directory / cls.build_filename(
+            subject=subject,
+            session=session,
+            task=task,
+            run=run,
+            desc=desc,
+            stat=stat,
+            suffix=suffix,
+        )
+
+    @staticmethod
+    def build_filename(
+        *,
+        subject: str,
+        session: str | None = None,
+        task: str,
+        run: str | None = None,
+        desc: str | None = None,
+        stat: str | None = None,
+        suffix: str = ".nii.gz",
+    ) -> str:
+        entity_tokens = [
+            f"sub-{_normalize_entity(subject, prefix='sub-')}",
+        ]
+        session_value = _normalize_entity(session, prefix="ses-")
+        if session_value is not None:
+            entity_tokens.append(f"ses-{session_value}")
+        entity_tokens.append(f"task-{_normalize_entity(task, prefix='task-')}")
+        run_value = _normalize_entity(run, prefix="run-")
+        if run_value is not None:
+            entity_tokens.append(f"run-{run_value}")
+
+        tokens = [f"desc-{_normalize_bids_component(desc, kind='Description')}"] if desc else []
         if stat:
-            tokens.append(_normalize_namespace(stat, kind="Statistic"))
-        stem = "_".join(tokens) or _normalize_namespace(namespace_name, kind="Derivative")
+            tokens.append(f"stat-{_normalize_bids_component(stat, kind='Statistic')}")
+        stem = "_".join(entity_tokens + tokens) if tokens else "_".join(entity_tokens)
 
         normalized_suffix = suffix if suffix.startswith(".") else f".{suffix}"
-        return directory / f"{stem}{normalized_suffix}"
+        return f"{stem}{normalized_suffix}"
 
 
 __all__ = ["DerivativePaths", "DerivativePathBuilder"]

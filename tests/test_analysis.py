@@ -270,7 +270,7 @@ def test_activation_analysis_computes_contrasts_from_fitted_model(tmp_path: Path
     assert len(outputs) == 1
     assert outputs[0].path == (
         tmp_path / "out" / "sub-001" / "func" / "task-nback" / "run-1" / "analyses"
-        / "activation" / "contrast-two_gt_one_stat-effect_size.nii.gz"
+        / "activation" / "sub-001_task-nback_run-1_desc-two-gt-one_stat-effect.nii.gz"
     )
     assert outputs[0].path.read_bytes() == b"contrast"
 

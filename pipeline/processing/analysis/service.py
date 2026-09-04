@@ -91,7 +91,7 @@ def run(
 
                         raise
                     metadata_path = model.write_metadata(fitted)
-                    design_matrix_path = model.write_design_matrix(fitted)
+                    model_derivatives = model.write_derivatives(fitted)
                     contrast_outputs = []
                     for analysis_spec in task_plan.analyses:
                         if analysis_spec.model != model_spec.name:
@@ -107,7 +107,7 @@ def run(
                         "model": model_spec.name,
                         "context": context.as_dict(),
                         "metadata": str(metadata_path),
-                        "design_matrix": str(design_matrix_path),
+                        "derivatives": model_derivatives,
                         "contrast_outputs": contrast_outputs,
                     })
                 except (OSError, ValueError, RuntimeError) as exc:
