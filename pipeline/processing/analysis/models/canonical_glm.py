@@ -66,7 +66,7 @@ class CanonicalGLMModel:
             standardize=configuration.get("standardize", False),
             noise_model=configuration.get("noise_model", "ar1"),
             minimize_memory=False,
-            reports=False,
+            reports=True,
             n_jobs=configuration.get("n_jobs", 1),
         )
 
