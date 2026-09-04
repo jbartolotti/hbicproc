@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import traceback
 from typing import Any
 
 import nibabel as nib
@@ -137,9 +138,14 @@ def run(
 def _log_fit_failure_diagnostics(context: Any, exc: Exception) -> None:
     """Log temporary diagnostics for a failed canonical GLM fit."""
 
-    logger.exception(
-        "CanonicalGLMModel.fit() failed for %s; original traceback follows",
+    traceback_text = "".join(
+        traceback.format_exception(type(exc), exc, exc.__traceback__)
+    )
+    logger.error(
+        "CanonicalGLMModel.fit() failed for %s. Full traceback:\n%s",
         context.as_dict(),
+        traceback_text,
+        exc_info=(type(exc), exc, exc.__traceback__),
     )
     logger.error("Canonical GLM failure exception: %s", exc)
     logger.error("Nilearn version: %s", getattr(nilearn, "__version__", "unknown"))
@@ -166,7 +172,10 @@ def _log_fit_failure_diagnostics(context: Any, exc: Exception) -> None:
         if context.events_path and context.events_path.exists():
             events = pd.read_csv(context.events_path, sep="\t")
             logger.error("Event dataframe dtypes:\n%s", events.dtypes.to_string())
-            logger.error("Event dataframe contents:\n%s", events.to_string(index=False))
+            logger.error(
+                "Event dataframe contents:\n%s",
+                events.to_string(index=False, max_rows=None, max_cols=None),
+            )
         else:
             logger.error("Event dataframe diagnostics unavailable (no events file)")
     except Exception as diagnostic_exc:  # pragma: no cover - diagnostic fallback
