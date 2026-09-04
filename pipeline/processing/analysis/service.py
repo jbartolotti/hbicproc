@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from .dataset import DatasetIndex
+from .analyses import ActivationAnalysis
 from .models import CanonicalGLMModel
 from .planning import build_task_plans
 
@@ -71,11 +72,23 @@ def run(
                     fitted = model.fit(model_plan)
                     metadata_path = model.write_metadata(fitted)
                     statistics_path = model.write_sufficient_statistics(fitted)
+                    contrast_outputs = []
+                    for analysis_spec in task_plan.analyses:
+                        if analysis_spec.model != model_spec.name:
+                            continue
+                        if analysis_spec.name != "activation":
+                            continue
+                        analysis_plan = analysis_spec.plan(context, model_spec, output_root)
+                        contrast_outputs.extend(
+                            output.as_dict()
+                            for output in ActivationAnalysis().run(fitted, analysis_plan)
+                        )
                     fitted_models.append({
                         "model": model_spec.name,
                         "context": context.as_dict(),
                         "metadata": str(metadata_path),
                         "sufficient_statistics": str(statistics_path),
+                        "contrast_outputs": contrast_outputs,
                     })
                 except (OSError, ValueError, RuntimeError) as exc:
                     errors.append(

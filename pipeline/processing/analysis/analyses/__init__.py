@@ -1,3 +1,4 @@
 from .base import AnalysisPlan, AnalysisSpec
+from .activation import ActivationAnalysis, ContrastOutput
 
-__all__ = ["AnalysisPlan", "AnalysisSpec"]
+__all__ = ["ActivationAnalysis", "AnalysisPlan", "AnalysisSpec", "ContrastOutput"]

@@ -14,6 +14,8 @@ from pipeline.processing.analysis import (
     TaskRunContext,
     build_task_plans,
 )
+from pipeline.processing.analysis.analyses.activation import ActivationAnalysis
+from pipeline.processing.analysis.models.canonical_glm import FittedModel
 from pipeline.processing.analysis.derivatives import DerivativePathBuilder
 from pipeline.processing.analysis.models.canonical_glm import CanonicalGLMModel
 from pipeline.processing.analysis.service import run
@@ -240,3 +242,40 @@ def test_canonical_glm_fits_one_run_with_events_and_confounds(tmp_path: Path, mo
         assert statistics["theta_0"].shape == (1, 2, 1)
         assert statistics["cov_0"].shape == (1, 2, 2)
     assert (statistics_path.parent / "sufficient_statistics.json").exists()
+
+
+def test_activation_analysis_computes_contrasts_from_fitted_model(tmp_path: Path) -> None:
+    class FakeImage:
+        def to_filename(self, path: Path) -> None:
+            path.write_bytes(b"contrast")
+
+    class FakeEstimator:
+        def compute_contrast(self, definition: str, *, output_type: str) -> FakeImage:
+            assert definition == "two - one"
+            assert output_type == "effect_size"
+            return FakeImage()
+
+    model = ModelSpec("canonical_glm", "canonical_glm", {})
+    context = TaskRunContext(subject="001", task="nback", run="1")
+    fitted = FittedModel(
+        plan=model.plan(context, str(tmp_path / "out")),
+        estimator=FakeEstimator(),  # type: ignore[arg-type]
+        events=pd.DataFrame(),
+        confounds=None,
+    )
+    analysis = AnalysisSpec(
+        "activation",
+        "canonical_glm",
+        {"contrasts": {"two_gt_one": "two - one"}, "output_types": ["effect_size"]},
+    )
+    outputs = ActivationAnalysis().run(
+        fitted,
+        analysis.plan(context, model, str(tmp_path / "out")),
+    )
+
+    assert len(outputs) == 1
+    assert outputs[0].path == (
+        tmp_path / "out" / "sub-001" / "func" / "task-nback" / "run-1" / "analyses"
+        / "activation" / "contrast-two_gt_one_stat-effect_size.nii.gz"
+    )
+    assert outputs[0].path.read_bytes() == b"contrast"
