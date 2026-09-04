@@ -16,7 +16,7 @@ from pipeline.processing.analysis import (
     build_task_plans,
 )
 from pipeline.processing.analysis.analyses.activation import ActivationAnalysis
-from pipeline.processing.analysis.analyses.atlas import AtlasCache
+from pipeline.processing.analysis.analyses.atlas import Atlas, AtlasCache
 from pipeline.processing.analysis.models.canonical_glm import FittedModel
 from pipeline.processing.analysis.derivatives import DerivativePathBuilder
 from pipeline.processing.analysis.models.canonical_glm import CanonicalGLMModel
@@ -273,6 +273,32 @@ def test_activation_analysis_computes_contrasts_from_fitted_model(tmp_path: Path
         / "activation" / "sub-001_task-nback_run-1_desc-two-gt-one_stat-effect.nii.gz"
     )
     assert outputs[0].path.read_bytes() == b"contrast"
+
+
+def test_atlas_residual_timeseries_is_wide(tmp_path: Path) -> None:
+    atlas_path = tmp_path / "atlas.nii.gz"
+    atlas_data = np.array([[[1, 1]], [[2, 2]]], dtype=np.int16)
+    target_data = np.zeros((2, 1, 2, 2), dtype=float)
+    target_data[0, 0, :, 0] = [1, 3]
+    target_data[1, 0, :, 0] = [5, 7]
+    target_data[0, 0, :, 1] = [2, 4]
+    target_data[1, 0, :, 1] = [6, 8]
+    affine = np.eye(4)
+    nib.save(nib.Nifti1Image(atlas_data, affine), atlas_path)
+    target = nib.Nifti1Image(target_data[..., 0], affine)
+    residual = nib.Nifti1Image(target_data, affine)
+
+    cache = AtlasCache(tmp_path / "atlas-cache")
+    cache._atlases["test"] = Atlas(name="test", maps=atlas_path)
+    output_path = tmp_path / "residuals.tsv"
+    cache.roi_residual_timeseries("test", [residual], target, output_path)
+
+    table = pd.read_csv(output_path, sep="\t")
+    assert list(table.columns) == ["timepoint", "roi-1", "roi-2"]
+    assert table.to_dict("records") == [
+        {"timepoint": 0, "roi-1": 2.0, "roi-2": 6.0},
+        {"timepoint": 1, "roi-1": 3.0, "roi-2": 7.0},
+    ]
 
 
 def test_canonical_glm_rejects_missing_required_confounds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

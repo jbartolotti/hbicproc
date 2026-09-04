@@ -89,8 +89,7 @@ class ActivationAnalysis:
                 title=(
                     f"First-level GLM: {fitted.plan.context.subject} "
                     f"{fitted.plan.context.task} {fitted.plan.context.session or ''}"
-                ).strip(),
-                bg_img=None,
+                ).strip()
             )
             report_path = output_dir / DerivativePathBuilder.build_filename(
                 subject=fitted.plan.context.subject,

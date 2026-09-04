@@ -108,18 +108,19 @@ class AtlasCache:
         labels = np.asarray(atlas_image.get_fdata())
         rois = sorted(int(value) for value in np.unique(labels) if value > 0)
         rows = []
-        for run_index, residual in enumerate(residuals, start=1):
+        timepoint = 0
+        for residual in residuals:
             values = np.asarray(residual.get_fdata())
             if values.ndim == 3:
                 values = values[..., np.newaxis]
-            for timepoint in range(values.shape[-1]):
+            for residual_timepoint in range(values.shape[-1]):
+                row: dict[str, Any] = {"timepoint": timepoint}
                 for roi in rois:
-                    rows.append({
-                        "run": run_index,
-                        "timepoint": timepoint,
-                        "roi": roi,
-                        "value": float(np.nanmean(values[..., timepoint][labels == roi])),
-                    })
+                    row[f"roi-{roi}"] = float(
+                        np.nanmean(values[..., residual_timepoint][labels == roi])
+                    )
+                rows.append(row)
+                timepoint += 1
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(rows).to_csv(output, sep="\t", index=False)
