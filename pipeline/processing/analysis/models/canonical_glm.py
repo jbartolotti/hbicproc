@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import nibabel as nib
+from nibabel.dft import logger
 import numpy as np
 import pandas as pd
 from nilearn.glm.first_level import FirstLevelModel
@@ -67,6 +68,18 @@ class CanonicalGLMModel:
             reports=False,
             n_jobs=configuration.get("n_jobs", 1),
         )
+
+
+        img = nib.load(str(context.bold_path))
+
+        logger.info(
+            "GLM input check: file=%s volumes=%d confounds_shape=%s events_rows=%d",
+            context.bold_path,
+            img.shape[-1],
+            None if confounds is None else confounds.shape,
+            len(events),
+        )
+
         estimator.fit(
             str(context.bold_path),
             events=events,
