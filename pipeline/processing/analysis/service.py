@@ -70,10 +70,12 @@ def run(
                     model = CanonicalGLMModel(model_spec)
                     fitted = model.fit(model_plan)
                     metadata_path = model.write_metadata(fitted)
+                    statistics_path = model.write_sufficient_statistics(fitted)
                     fitted_models.append({
                         "model": model_spec.name,
                         "context": context.as_dict(),
                         "metadata": str(metadata_path),
+                        "sufficient_statistics": str(statistics_path),
                     })
                 except (OSError, ValueError, RuntimeError) as exc:
                     errors.append(

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import nibabel as nib
+import numpy as np
 import pandas as pd
 from nilearn.glm.first_level import FirstLevelModel
 
@@ -88,6 +89,49 @@ class CanonicalGLMModel:
         }
         metadata_path.write_text(json.dumps(metadata, indent=2, default=str) + "\n", encoding="utf-8")
         return metadata_path
+
+    def write_sufficient_statistics(self, fitted: FittedModel) -> Path:
+        """Persist beta/covariance statistics needed for later contrasts."""
+
+        output_dir = fitted.plan.derivatives.model_directory
+        if output_dir is None:
+            raise ValueError("Canonical GLM model plan has no model derivative directory.")
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        results = fitted.estimator.results_
+        arrays: dict[str, np.ndarray] = {
+            "design_matrix": np.asarray(fitted.estimator.design_matrices_[0], dtype=float),
+        }
+        result_metadata: list[dict[str, Any]] = []
+        for index, result_group in enumerate(results):
+            arrays[f"theta_{index}"] = np.asarray(
+                np.stack([np.asarray(result.theta) for result in result_group.values()])
+            )
+            arrays[f"cov_{index}"] = np.asarray(
+                np.stack([np.asarray(result.cov) for result in result_group.values()])
+            )
+            arrays[f"dispersion_{index}"] = np.asarray(
+                np.stack([np.asarray(result.dispersion) for result in result_group.values()])
+            )
+            result_metadata.append({
+                "labels": [str(label) for label in result_group],
+                "df_residuals": [int(result.df_residuals) for result in result_group.values()],
+            })
+
+        statistics_path = output_dir / "sufficient_statistics.npz"
+        np.savez_compressed(statistics_path, **arrays)
+        metadata_path = output_dir / "sufficient_statistics.json"
+        metadata = {
+            "version": 1,
+            "model": self.spec.name,
+            "model_type": self.spec.model_type,
+            "fingerprint_configuration": self.spec.fingerprint_configuration,
+            "context": fitted.plan.context.as_dict(),
+            "design_columns": list(fitted.estimator.design_matrices_[0].columns),
+            "result_groups": result_metadata,
+        }
+        metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+        return statistics_path
 
     def _load_confounds(self, context: TaskRunContext) -> pd.DataFrame | None:
         configuration = self.spec.configuration

@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from pipeline.cli import _build_parser
@@ -197,7 +199,18 @@ def test_canonical_glm_fits_one_run_with_events_and_confounds(tmp_path: Path, mo
             self.image = image
             self.events = events
             self.confounds = confounds
-            self.design_matrices_ = [type("Design", (), {"columns": ["one", "trans_x"]})()]
+            self.design_matrices_ = [pd.DataFrame([[1.0, 0.1]], columns=["one", "trans_x"])]
+            result = type(
+                "Result",
+                (),
+                {
+                    "theta": np.array([[1.0], [2.0]]),
+                    "cov": np.eye(2),
+                    "dispersion": np.array([0.5]),
+                    "df_residuals": 10,
+                },
+            )()
+            self.results_ = [{"0": result}]
             return self
 
     monkeypatch.setattr("pipeline.processing.analysis.models.canonical_glm.FirstLevelModel", FakeGLM)
@@ -215,8 +228,15 @@ def test_canonical_glm_fits_one_run_with_events_and_confounds(tmp_path: Path, mo
         confounds_path=confounds_path,
     )
 
-    fitted = CanonicalGLMModel(spec).fit(spec.plan(context, str(tmp_path / "out")))
+    model = CanonicalGLMModel(spec)
+    fitted = model.fit(spec.plan(context, str(tmp_path / "out")))
+    statistics_path = model.write_sufficient_statistics(fitted)
 
     assert fitted.estimator.image == str(bold_path)
     assert list(fitted.events["trial_type"]) == ["one"]
     assert list(fitted.confounds.columns) == ["trans_x"]
+    with np.load(statistics_path) as statistics:
+        assert statistics["design_matrix"].shape == (1, 2)
+        assert statistics["theta_0"].shape == (1, 2, 1)
+        assert statistics["cov_0"].shape == (1, 2, 2)
+    assert (statistics_path.parent / "sufficient_statistics.json").exists()
