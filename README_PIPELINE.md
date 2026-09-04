@@ -50,9 +50,9 @@ specifications from analysis specifications. The global `analysis.input_dataset`
 task, and an individual task may override it with its own dataset name and path. Configured tasks
 default to enabled unless `enabled` is explicitly set to `false`.
 
-PR 1 establishes analysis planning, task/run contexts, derivative namespaces, and model/analysis
-interfaces. It does not fit models or generate scientific analysis outputs yet. See
-[docs/analysis.md](docs/analysis.md) for the configuration schema and output namespace.
+The analysis stage fits configured canonical GLMs independently per run, persists reusable model
+sufficient statistics, computes activation contrasts, and keeps atlas source files in an external
+cache. See [docs/analysis.md](docs/analysis.md) for the configuration schema and output namespaces.
 
 Each stage is a thin `pipeline.stages` wrapper around a corresponding `pipeline.processing.<stage>.service`
 module. The CLI (`pipeline/cli.py`) builds its subcommands directly from the `STAGE_CLASSES` registry in
