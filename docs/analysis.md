@@ -73,17 +73,17 @@ derivatives/hbicproc/
             models/
               canonical_glm/
                 model_metadata.json
-                sufficient_statistics.json
-                sufficient_statistics.npz
+                design_matrix.tsv
             analyses/
               activation/
                 contrast-2back_gt_1back_stat-effect_size.nii.gz
                 contrast-2back_gt_1back_stat-z_score.nii.gz
 ```
 
-The fitted GLM computes initial activation contrasts in memory. Sufficient statistics
-are persisted with the model so later contrast-only recomputation can avoid refitting.
-Contrast configuration is not part of the model fingerprint.
+The fitted GLM computes requested activation contrasts immediately while the fitted
+model remains in memory. The model derivative includes portable metadata and the
+design matrix; Nilearn fitting state is not serialized. Additional contrasts require
+refitting the model. Contrast configuration is not part of the model fingerprint.
 
 Atlas settings are analysis concerns and are excluded from model fingerprints. Atlas
 source files are fetched into the external `~/.cache/hbicproc/atlases` cache by default,
@@ -99,5 +99,5 @@ hbicproc analysis --all
 ```
 
 The `analysis` service validates configuration, discovers task runs, fits supported
-models, persists reusable model statistics, and executes configured activation
-outputs. Group analysis is not implemented.
+models, writes model derivatives, and executes configured activation outputs. Group
+analysis is not implemented.

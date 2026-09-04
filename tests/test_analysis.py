@@ -205,20 +205,13 @@ def test_canonical_glm_fits_one_run_with_events_and_confounds(tmp_path: Path, mo
             self.events = events
             self.confounds = confounds
             self.design_matrices_ = [pd.DataFrame([[1.0, 0.1]], columns=["one", "trans_x"])]
-            result = type(
-                "Result",
-                (),
-                {
-                    "theta": np.array([[1.0], [2.0]]),
-                    "cov": np.eye(2),
-                    "dispersion": np.array([0.5]),
-                    "df_residuals": 10,
-                },
-            )()
-            self.results_ = [{"0": result}]
             return self
 
     monkeypatch.setattr("pipeline.processing.analysis.models.canonical_glm.FirstLevelModel", FakeGLM)
+    monkeypatch.setattr(
+        "pipeline.processing.analysis.models.canonical_glm.nib.load",
+        lambda _path: type("Image", (), {"shape": (2, 2, 2, 1)})(),
+    )
     spec = ModelSpec(
         "canonical_glm",
         "canonical_glm",
@@ -235,16 +228,14 @@ def test_canonical_glm_fits_one_run_with_events_and_confounds(tmp_path: Path, mo
 
     model = CanonicalGLMModel(spec)
     fitted = model.fit(spec.plan(context, str(tmp_path / "out")))
-    statistics_path = model.write_sufficient_statistics(fitted)
+    design_matrix_path = model.write_design_matrix(fitted)
 
     assert fitted.estimator.image == str(bold_path)
     assert list(fitted.events["trial_type"]) == ["one"]
     assert list(fitted.confounds.columns) == ["trans_x"]
-    with np.load(statistics_path) as statistics:
-        assert statistics["design_matrix"].shape == (1, 2)
-        assert statistics["theta_0"].shape == (1, 2, 1)
-        assert statistics["cov_0"].shape == (1, 2, 2)
-    assert (statistics_path.parent / "sufficient_statistics.json").exists()
+    assert pd.read_csv(design_matrix_path, sep="\t").shape == (1, 2)
+    assert not (design_matrix_path.parent / "sufficient_statistics.npz").exists()
+    assert not (design_matrix_path.parent / "sufficient_statistics.json").exists()
 
 
 def test_activation_analysis_computes_contrasts_from_fitted_model(tmp_path: Path) -> None:
