@@ -3,6 +3,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import nibabel as nib
+import nilearn
+import pandas as pd
+
 from .dataset import DatasetIndex
 from .analyses import ActivationAnalysis
 from .models import CanonicalGLMModel
@@ -69,7 +73,11 @@ def run(
                     continue
                 try:
                     model = CanonicalGLMModel(model_spec)
-                    fitted = model.fit(model_plan)
+                    try:
+                        fitted = model.fit(model_plan)
+                    except (OSError, ValueError, RuntimeError) as exc:
+                        _log_fit_failure_diagnostics(context, exc)
+                        raise
                     metadata_path = model.write_metadata(fitted)
                     statistics_path = model.write_sufficient_statistics(fitted)
                     contrast_outputs = []
@@ -124,6 +132,45 @@ def run(
             "errors": errors,
         },
     }
+
+
+def _log_fit_failure_diagnostics(context: Any, exc: Exception) -> None:
+    """Log temporary diagnostics for a failed canonical GLM fit."""
+
+    logger.exception(
+        "CanonicalGLMModel.fit() failed for %s; original traceback follows",
+        context.as_dict(),
+    )
+    logger.error("Canonical GLM failure exception: %s", exc)
+    logger.error("Nilearn version: %s", getattr(nilearn, "__version__", "unknown"))
+    logger.error("Nibabel version: %s", getattr(nib, "__version__", "unknown"))
+
+    try:
+        bold_shape = nib.load(str(context.bold_path)).shape if context.bold_path else None
+        logger.error("BOLD image shape: %s", bold_shape)
+    except Exception as diagnostic_exc:  # pragma: no cover - diagnostic fallback
+        logger.error("Could not load BOLD image for diagnostics: %s", diagnostic_exc)
+
+    try:
+        if context.confounds_path and context.confounds_path.exists():
+            confounds = pd.read_csv(context.confounds_path, sep="\t")
+            logger.error("Confounds shape: %s", confounds.shape)
+            logger.error("Confounds columns: %s", list(confounds.columns))
+        else:
+            logger.error("Confounds shape: unavailable (no confounds file)")
+            logger.error("Confounds columns: unavailable (no confounds file)")
+    except Exception as diagnostic_exc:  # pragma: no cover - diagnostic fallback
+        logger.error("Could not load confounds for diagnostics: %s", diagnostic_exc)
+
+    try:
+        if context.events_path and context.events_path.exists():
+            events = pd.read_csv(context.events_path, sep="\t")
+            logger.error("Event dataframe dtypes:\n%s", events.dtypes.to_string())
+            logger.error("Event dataframe contents:\n%s", events.to_string(index=False))
+        else:
+            logger.error("Event dataframe diagnostics unavailable (no events file)")
+    except Exception as diagnostic_exc:  # pragma: no cover - diagnostic fallback
+        logger.error("Could not load events for diagnostics: %s", diagnostic_exc)
 
 
 __all__ = ["run"]
