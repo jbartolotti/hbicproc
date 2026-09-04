@@ -76,8 +76,19 @@ def run(
                     model = CanonicalGLMModel(model_spec)
                     try:
                         fitted = model.fit(model_plan)
-                    except (OSError, ValueError, RuntimeError) as exc:
-                        _log_fit_failure_diagnostics(context, exc)
+                    except Exception as exc:
+                        logger.exception(
+                            "Model fit failed: %s/%s/%s",
+                            context.subject,
+                            context.task,
+                            context.session,
+                        )
+
+                        try:
+                            _log_fit_failure_diagnostics(context, exc)
+                        except Exception:
+                            logger.exception("Diagnostic logging itself failed")
+
                         raise
                     metadata_path = model.write_metadata(fitted)
                     statistics_path = model.write_sufficient_statistics(fitted)
