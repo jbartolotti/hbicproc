@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -37,12 +39,22 @@ class AtlasOutput:
         return {"atlas": self.atlas, "path": str(self.path)}
 
 
+@dataclass(frozen=True)
+class ReportOutput:
+    """HTML report generated from the fitted model and activation contrasts."""
+
+    path: Path
+
+    def as_dict(self) -> dict[str, str]:
+        return {"report": str(self.path)}
+
+
 class ActivationAnalysis:
     """Compute configured activation contrasts from a fitted first-level GLM."""
 
     analysis_type = "activation"
 
-    def run(self, fitted: FittedModel, plan: AnalysisPlan) -> tuple[ContrastOutput | AtlasOutput, ...]:
+    def run(self, fitted: FittedModel, plan: AnalysisPlan) -> tuple[ContrastOutput | AtlasOutput | ReportOutput, ...]:
         contrasts = self._contrasts(plan.spec.configuration.get("contrasts", {}))
         output_types = self._output_types(plan.spec.configuration.get("output_types"))
         output_dir = plan.derivatives.analysis_directory
@@ -50,7 +62,7 @@ class ActivationAnalysis:
             raise ValueError("Activation analysis plan has no analysis derivative directory.")
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        outputs: list[ContrastOutput | AtlasOutput] = []
+        outputs: list[ContrastOutput | AtlasOutput | ReportOutput] = []
         target_image = None
         for name, definition in contrasts.items():
             for output_type in output_types:
@@ -69,6 +81,45 @@ class ActivationAnalysis:
                 )
                 image.to_filename(path)
                 outputs.append(ContrastOutput(name, output_type, path))
+
+        generate_report = getattr(fitted.estimator, "generate_report", None)
+        if callable(generate_report):
+            report = generate_report(
+                contrasts=contrasts,
+                title=(
+                    f"First-level GLM: {fitted.plan.context.subject} "
+                    f"{fitted.plan.context.task} {fitted.plan.context.session or ''}"
+                ).strip(),
+                bg_img=None,
+            )
+            report_path = output_dir / DerivativePathBuilder.build_filename(
+                subject=fitted.plan.context.subject,
+                session=fitted.plan.context.session,
+                task=fitted.plan.context.task,
+                run=fitted.plan.context.run,
+                desc="first-level-report",
+                suffix=".html",
+            )
+            report.save_as_html(str(report_path))
+            metadata = {
+                "model": fitted.plan.spec.name,
+                "model_type": fitted.plan.spec.model_type,
+                "context": fitted.plan.context.as_dict(),
+                "fingerprint_configuration": fitted.plan.spec.fingerprint_configuration,
+                "design_columns": list(fitted.estimator.design_matrices_[0].columns),
+                "contrasts": dict(contrasts),
+            }
+            report_html = report_path.read_text(encoding="utf-8")
+            metadata_html = (
+                "<section><h2>Model metadata</h2><pre>"
+                f"{html.escape(json.dumps(metadata, indent=2, default=str))}"
+                "</pre></section>"
+            )
+            report_path.write_text(
+                report_html.replace("</body>", f"{metadata_html}</body>"),
+                encoding="utf-8",
+            )
+            outputs.append(ReportOutput(report_path))
         atlas_names = plan.spec.configuration.get("atlases", fitted.plan.spec.configuration.get("atlases", ()))
         if isinstance(atlas_names, str):
             atlas_names = [atlas_names]
@@ -169,4 +220,4 @@ class ActivationAnalysis:
         }.get(value, value.replace("_", "-"))
 
 
-__all__ = ["ActivationAnalysis", "AtlasOutput", "ContrastOutput"]
+__all__ = ["ActivationAnalysis", "AtlasOutput", "ContrastOutput", "ReportOutput"]

@@ -8,8 +8,8 @@ from typing import Any, Mapping
 import nibabel as nib
 from nibabel.dft import logger
 import pandas as pd
-import matplotlib.pyplot as plt
 from nilearn.glm.first_level import FirstLevelModel
+from nilearn.plotting import plot_design_matrix
 
 from ..context import TaskRunContext
 from ..derivatives import DerivativePathBuilder
@@ -136,14 +136,9 @@ class CanonicalGLMModel:
             suffix=".png",
         )
         design_png.parent.mkdir(parents=True, exist_ok=True)
-        figure = fitted.estimator.design_matrices_[0].T
-        plt.figure(figsize=(max(8, figure.shape[1] / 8), max(4, figure.shape[0] / 2)))
-        plt.imshow(figure, aspect="auto", interpolation="nearest", cmap="viridis")
-        plt.yticks(range(len(figure.index)), figure.index)
-        plt.xlabel("Scan")
-        plt.tight_layout()
-        plt.savefig(design_png, dpi=150)
-        plt.close()
+        ax = plot_design_matrix(fitted.estimator.design_matrices_[0])
+        ax.figure.savefig(design_png, dpi=150, bbox_inches="tight")
+        ax.figure.clf()
         derivatives["design_matrix_png"] = [str(design_png)]
 
         mask_img = getattr(fitted.estimator, "mask_img_", None)
@@ -234,20 +229,6 @@ class CanonicalGLMModel:
             summary_path.write_text(json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8")
             derivatives["motion_qc"] = [str(summary_path), str(motion_path)]
 
-        generate_report = getattr(fitted.estimator, "generate_report", None)
-        if callable(generate_report):
-            report = generate_report()
-            report_path = self._model_file(
-                fitted,
-                subject=context.subject,
-                session=context.session,
-                task=context.task,
-                run=context.run,
-                desc="first-level-report",
-                suffix=".html",
-            )
-            report.save_as_html(str(report_path))
-            derivatives["report"] = [str(report_path)]
         return derivatives
 
     def _model_file(

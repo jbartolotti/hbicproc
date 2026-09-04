@@ -76,8 +76,9 @@ derivatives/hbicproc/
                 sub-001_ses-01_task-nback_run-1_desc-design-matrix.tsv
             analyses/
               activation/
-                contrast-2back_gt_1back_stat-effect_size.nii.gz
-                contrast-2back_gt_1back_stat-z_score.nii.gz
+                sub-001_ses-01_task-nback_run-1_desc-first-level-report.html
+                sub-001_ses-01_task-nback_run-1_desc-2back-gt-1back_stat-effect.nii.gz
+                sub-001_ses-01_task-nback_run-1_desc-2back-gt-1back_stat-z.nii.gz
 ```
 
 The fitted GLM computes requested activation contrasts immediately while the fitted
