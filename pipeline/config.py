@@ -114,12 +114,13 @@ def _apply_defaults(config):
             "output_dir": "derivatives/behavior/events",
             "reader_backend": "auto",
             "verbose": False
-        }
+        },
+        "group": {}
     }
 
     merged = _deep_merge(defaults, config)
 
-    for key in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc", "analysis", "behavior"]:
+    for key in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc", "analysis", "behavior", "group"]:
         merged[key] = _deep_merge(defaults.get(key, {}), config.get(key, {}))
 
     user_tokens = config.get("tokens", {})

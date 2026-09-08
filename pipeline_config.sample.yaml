@@ -122,6 +122,37 @@ analysis:
             # Empty uses the external ~/.cache/hbicproc/atlases cache.
             atlas_cache_dir: ""
 
+group:
+  # Group analyses consume existing subject-level derivatives only.
+  activation:
+    enabled: false
+    task: nback
+    contrasts: [2back_gt_1back, 2back_gt_baseline, 1back_gt_baseline]
+    factors:
+      group:
+        source: participants.tsv
+        column: group
+      session:
+        source: bids_session
+        levels:
+          BL: baseline
+          W12: followup
+  dmn:
+    enabled: false
+    task: nback
+    contrasts: [2back_gt_1back, 2back_gt_baseline, 1back_gt_baseline]
+    atlas: schaefer200
+    network: Default
+    factors:
+      group:
+        source: participants.tsv
+        column: group
+      session:
+        source: bids_session
+        levels:
+          BL: baseline
+          W12: followup
+
 behavior:
   # Behavioral event extraction. Default: disabled.
   enabled: false

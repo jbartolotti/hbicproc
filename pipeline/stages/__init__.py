@@ -6,6 +6,7 @@ from .preprocess import PreprocessStage
 from .qc import QcStage
 from .qc_review import QcReviewStage
 from .validate import ValidateStage
+from .group import GroupStage
 
 STAGE_CLASSES = {
     "download": DownloadStage,
@@ -16,4 +17,5 @@ STAGE_CLASSES = {
     "preprocess": PreprocessStage,
     "analysis": AnalysisStage,
     "behavior": BehaviorStage,
+    "group": GroupStage,
 }

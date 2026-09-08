@@ -118,6 +118,13 @@ def _subject_exclusion(subject, config, runs, clear):
 def _handle_stage(parser, args, config):
     stage_name = args.command
 
+    if stage_name == "group":
+        from .stages.group import GroupStage
+
+        result = GroupStage().run(None, config, {}, dry_run=args.dry_run, rerun=args.rerun)
+        _print_result(result)
+        return 0 if result.success else 1
+
     if stage_name == "download" and args.summary and args.all:
         parser.error("Cannot specify --summary and --all together.")
 
@@ -200,13 +207,19 @@ def _build_parser():
     init_parser.add_argument("path", help="Path to write a new config file.")
 
     for stage_name in STAGE_CLASSES:
-        stage_parser = subparsers.add_parser(stage_name, help=f"Run the {stage_name} stage for a subject.")
-        stage_parser.add_argument("subject", nargs="?", help="Participant label, e.g. sub-011.")
-        stage_parser.add_argument(
-            "--all",
-            action="store_true",
-            help="Run the stage for all subjects found in the BIDS output directory.",
+        stage_help = (
+            "Run the global group analyses."
+            if stage_name == "group"
+            else f"Run the {stage_name} stage for a subject."
         )
+        stage_parser = subparsers.add_parser(stage_name, help=stage_help)
+        if stage_name != "group":
+            stage_parser.add_argument("subject", nargs="?", help="Participant label, e.g. sub-011.")
+            stage_parser.add_argument(
+                "--all",
+                action="store_true",
+                help="Run the stage for all subjects found in the BIDS output directory.",
+            )
         stage_parser.add_argument(
             "--rerun",
             action="store_true",
