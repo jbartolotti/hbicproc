@@ -115,7 +115,7 @@ class AtlasCache:
                 f"Unsupported atlas '{atlas_name}'. Use a built-in atlas, a configured custom atlas, "
                 "or an existing image path."
             )
-        maps = Path(str(fetched.maps))
+        maps = fetched.maps
         labels = tuple(str(label) for label in getattr(fetched, "labels", ()))
         atlas = Atlas(name=atlas_name, maps=maps, labels=labels)
         label_metadata = self._parcel_metadata(atlas)
