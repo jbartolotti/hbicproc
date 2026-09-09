@@ -101,6 +101,7 @@ def _apply_defaults(config):
                 "name": "fmriprep",
                 "path": "derivatives/fmriprep"
             },
+            "atlases": [],
             "subject": {
                 "tasks": {}
             }
@@ -154,6 +155,7 @@ def _normalize_analysis_configuration(analysis):
                 for analysis_config in analyses.values():
                     if isinstance(analysis_config, dict):
                         analysis_config.setdefault("enabled", True)
+                        analysis_config.setdefault("atlases", analysis.get("atlases", []))
 
 
 def validate_config(config):
@@ -167,6 +169,7 @@ def validate_config(config):
 
     input_dataset = analysis.get("input_dataset")
     _validate_input_dataset(input_dataset, field_name="analysis.input_dataset")
+    _validate_atlases(analysis.get("atlases", []), field_name="analysis.atlases")
 
     subject = analysis.get("subject")
     if not isinstance(subject, dict):
@@ -220,6 +223,46 @@ def validate_config(config):
                 raise ValueError(f"{field_name}.model must reference a model.")
             if model_name not in models:
                 raise ValueError(f"{field_name}.model references unknown model '{model_name}'.")
+            _validate_atlases(analysis_config.get("atlases", []), field_name=f"{field_name}.atlases")
+
+
+def _validate_atlases(value, *, field_name):
+    """Validate the centralized atlas provider configuration shape."""
+
+    if value is None:
+        return
+    if isinstance(value, str):
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_atlases(item, field_name=f"{field_name}[{index}]")
+        return
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be a name, list, or named mapping.")
+    if "type" not in value:
+        if set(value).issubset({"enabled"}):
+            if "enabled" in value and not isinstance(value["enabled"], bool):
+                raise ValueError(f"{field_name}.enabled must be a boolean.")
+            return
+        for name, specification in value.items():
+            if not str(name).strip():
+                raise ValueError(f"{field_name} contains an empty atlas name.")
+            if not isinstance(specification, dict):
+                raise ValueError(f"{field_name}.{name} must be an atlas provider object.")
+            _validate_atlases(specification, field_name=f"{field_name}.{name}")
+        return
+    atlas_type = str(value.get("type", "")).strip().lower()
+    required = {
+        "custom_label_atlas": ("atlas_file", "labels_file"),
+        "coordinate_spheres": ("roi_file",),
+    }
+    if atlas_type not in required:
+        raise ValueError(
+            f"{field_name}.type must be one of: {', '.join(sorted(required))}."
+        )
+    for key in required[atlas_type]:
+        if not str(value.get(key, "")).strip():
+            raise ValueError(f"{field_name}.{key} must not be empty.")
 
 
 def _validate_input_dataset(value, *, field_name):

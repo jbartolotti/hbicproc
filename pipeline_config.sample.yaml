@@ -86,6 +86,8 @@ analysis:
   input_dataset:
     name: fmriprep
     path: derivatives/fmriprep
+  # These may be set globally and are inherited by task analyses.
+  # atlases: [schaefer200, schaefer400, harvard_oxford_cortical, harvard_oxford_subcortical, aal]
   subject:
     # Configured tasks and analyses default to enabled.
     tasks:
@@ -121,6 +123,15 @@ analysis:
             atlases: [schaefer200, schaefer400]
             # Empty uses the external ~/.cache/hbicproc/atlases cache.
             atlas_cache_dir: ""
+            # Named custom providers are also supported:
+            # atlases:
+            #   memory_rois:
+            #     type: custom_label_atlas
+            #     atlas_file: code/atlases/custom_memory.nii.gz
+            #     labels_file: code/atlases/custom_memory_labels.tsv
+            #   executive_network:
+            #     type: coordinate_spheres
+            #     roi_file: code/atlases/executive_rois.tsv
 
 group:
   # Group analyses consume existing subject-level derivatives only.

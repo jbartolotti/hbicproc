@@ -125,9 +125,8 @@ class ActivationAnalysis:
             )
             outputs.append(ReportOutput(report_path))
         atlas_names = plan.spec.configuration.get("atlases", fitted.plan.spec.configuration.get("atlases", ()))
-        if isinstance(atlas_names, str):
-            atlas_names = [atlas_names]
-        if target_image is not None and isinstance(atlas_names, (list, tuple, set)):
+        atlas_configurations = self._atlas_configurations(atlas_names)
+        if target_image is not None and atlas_configurations:
             cache = AtlasCache(plan.spec.configuration.get("atlas_cache_dir"))
             conditions = fitted.plan.spec.configuration.get("conditions", ())
             if isinstance(conditions, str):
@@ -144,7 +143,8 @@ class ActivationAnalysis:
                 residuals = getattr(fitted.estimator, "residuals", None)
             if not isinstance(residuals, (list, tuple)):
                 residuals = []
-            for atlas_name in atlas_names:
+            for atlas_name, atlas_spec in atlas_configurations:
+                cache.register(atlas_name, atlas_spec)
                 atlas_text = self._component(str(atlas_name))
                 path = output_dir / DerivativePathBuilder.build_filename(
                     subject=fitted.plan.context.subject,
@@ -195,6 +195,31 @@ class ActivationAnalysis:
                     cache.roi_residual_timeseries(str(atlas_name), list(residuals), target_image, residual_path)
                     outputs.append(AtlasOutput(f"{atlas_name}:residuals", residual_path))
         return tuple(outputs)
+
+    @staticmethod
+    def _atlas_configurations(value: Any) -> tuple[tuple[str, Mapping[str, Any] | None], ...]:
+        """Normalize string, list, and named mapping atlas configuration forms."""
+
+        if isinstance(value, str):
+            return ((value, None),)
+        if isinstance(value, Mapping):
+            return tuple(
+                (str(name), specification if isinstance(specification, Mapping) else None)
+                for name, specification in value.items()
+            )
+        if isinstance(value, (list, tuple, set)):
+            normalized = []
+            for item in value:
+                if isinstance(item, str):
+                    normalized.append((item, None))
+                elif isinstance(item, Mapping):
+                    normalized.extend(ActivationAnalysis._atlas_configurations(item))
+                else:
+                    raise ValueError("Atlas entries must be names or named provider specifications.")
+            return tuple(normalized)
+        if value in (None, ()):
+            return ()
+        raise ValueError("Activation atlases must be a name, list, or named mapping.")
 
     @staticmethod
     def _contrasts(value: Any) -> Mapping[str, str]:
