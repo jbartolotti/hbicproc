@@ -61,21 +61,26 @@ class AtlasCache:
     def get(self, name: str) -> Atlas:
         atlas_name = str(name).strip()
         if atlas_name in self._atlases:
-            return self._atlases[atlas_name]
+            atlas = self._atlases[atlas_name]
+            self._log_provider(atlas)
+            return atlas
         specification = self._specifications.get(atlas_name, {})
         atlas_type = str(specification.get("type", "")).strip().lower()
         if atlas_type == "custom_label_atlas":
             atlas = self._load_custom_label_atlas(atlas_name, specification)
             self._atlases[atlas_name] = atlas
+            self._log_provider(atlas)
             return atlas
         if atlas_type == "coordinate_spheres":
             atlas = self._load_coordinate_sphere_metadata(atlas_name, specification)
             self._atlases[atlas_name] = atlas
+            self._log_provider(atlas)
             return atlas
         configured_path = Path(atlas_name).expanduser()
         if configured_path.exists():
             atlas = Atlas(name=atlas_name, maps=configured_path)
             self._atlases[atlas_name] = atlas
+            self._log_provider(atlas)
             return atlas
         if not atlas_name or atlas_name in {".", ".."} or "/" in atlas_name or "\\" in atlas_name:
             raise ValueError(f"Atlas names must be single path components: {name!r}.")
@@ -130,7 +135,35 @@ class AtlasCache:
             ),
         )
         self._atlases[atlas_name] = atlas
+        self._log_provider(atlas)
         return atlas
+
+    @staticmethod
+    def _log_provider(atlas: Atlas) -> None:
+        LOGGER.info("Atlas provider execution: name=%s maps_type=%s", atlas.name, type(atlas.maps))
+
+    @staticmethod
+    def _load_atlas_image(atlas: Atlas) -> Any:
+        LOGGER.info(
+            "Before load_img: type=%s repr=%s",
+            type(atlas.maps),
+            repr(atlas.maps)[:200],
+        )
+        return load_img(atlas.maps)
+
+    @staticmethod
+    def _resample_atlas(atlas_image: Any, target_img: Any) -> Any:
+        LOGGER.info(
+            "Before resample_to_img: type=%s repr=%s",
+            type(atlas_image),
+            repr(atlas_image)[:200],
+        )
+        LOGGER.info(
+            "Before resample_to_img: type=%s repr=%s",
+            type(target_img),
+            repr(target_img)[:200],
+        )
+        return resample_to_img(atlas_image, target_img, interpolation="nearest")
 
     def _load_custom_label_atlas(
         self, name: str, specification: Mapping[str, Any]
@@ -244,7 +277,7 @@ class AtlasCache:
         atlas = self._atlas_for(name, target_img)
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
-        resampled = resample_to_img(load_img(atlas.maps), target_img, interpolation="nearest")
+        resampled = self._resample_atlas(self._load_atlas_image(atlas), target_img)
         resampled.to_filename(output)
         return atlas
 
@@ -256,7 +289,7 @@ class AtlasCache:
         output_path: str | Path,
     ) -> Path:
         atlas = self._atlas_for(name, target_img)
-        atlas_image = resample_to_img(load_img(atlas.maps), target_img, interpolation="nearest")
+        atlas_image = self._resample_atlas(self._load_atlas_image(atlas), target_img)
         labels = np.round(atlas_image.get_fdata()).astype(np.int32)
         rows = []
         for roi in sorted(int(value) for value in np.unique(labels) if value > 0):
@@ -281,7 +314,7 @@ class AtlasCache:
         """Extract long-format parcel values from saved contrast effect images."""
 
         atlas = self._atlas_for(name, target_img)
-        atlas_image = resample_to_img(load_img(atlas.maps), target_img, interpolation="nearest")
+        atlas_image = self._resample_atlas(self._load_atlas_image(atlas), target_img)
         labels = np.round(atlas_image.get_fdata()).astype(np.int32)
         metadata = self._parcel_metadata(atlas)
         parcel_ids = sorted(int(value) for value in np.unique(labels) if value > 0)
@@ -395,7 +428,7 @@ class AtlasCache:
         output_path: str | Path,
     ) -> Path:
         atlas = self._atlas_for(name, target_img)
-        atlas_image = resample_to_img(load_img(atlas.maps), target_img, interpolation="nearest")
+        atlas_image = self._resample_atlas(self._load_atlas_image(atlas), target_img)
         labels = np.round(atlas_image.get_fdata()).astype(np.int32)
         rois = sorted(int(value) for value in np.unique(labels) if value > 0)
         rows = []
