@@ -96,6 +96,73 @@ class AtlasCache:
         pd.DataFrame(rows).to_csv(output, sep="\t", index=False)
         return output
 
+    def roi_contrast_summary(
+        self,
+        name: str,
+        contrast_images: dict[str, Any],
+        target_img: Any,
+        output_path: str | Path,
+    ) -> Path:
+        """Extract long-format parcel values from saved contrast effect images."""
+
+        atlas = self.get(name)
+        atlas_image = resample_to_img(str(atlas.maps), target_img, interpolation="nearest")
+        labels = np.asarray(atlas_image.get_fdata())
+        metadata = self._parcel_metadata(atlas)
+        rows = []
+        for roi in sorted(int(value) for value in np.unique(labels) if value > 0):
+            mask = labels == roi
+            parcel = metadata.get(roi, {"parcel_label": "", "network": "", "hemisphere": ""})
+            for contrast, image in contrast_images.items():
+                values = np.asarray(image.get_fdata())
+                rows.append({
+                    "parcel_id": roi,
+                    "parcel_label": parcel["parcel_label"],
+                    "network": parcel["network"],
+                    "hemisphere": parcel["hemisphere"],
+                    "contrast": contrast,
+                    "effect": float(np.nanmean(values[mask])),
+                })
+        output = Path(output_path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(
+            rows,
+            columns=["parcel_id", "parcel_label", "network", "hemisphere", "contrast", "effect"],
+        ).to_csv(output, sep="\t", index=False)
+        return output
+
+    @staticmethod
+    def _parcel_metadata(atlas: Atlas) -> dict[int, dict[str, str]]:
+        metadata = {}
+        network_names = {
+            "default": "Default",
+            "sommot": "Somatomotor",
+            "somatomotor": "Somatomotor",
+            "vis": "Visual",
+            "visual": "Visual",
+            "limbic": "Limbic",
+            "salventattn": "Salience",
+            "salience": "Salience",
+            "dorsattn": "Dorsal Attention",
+            "dorsalattention": "Dorsal Attention",
+            "cont": "Frontoparietal",
+            "frontoparietal": "Frontoparietal",
+        }
+        for parcel_id, raw_label in enumerate(atlas.labels, start=1):
+            label = str(raw_label).strip().strip("b'").strip('"')
+            parts = label.split("_")
+            hemisphere = parts[1] if len(parts) > 1 and parts[1] in {"LH", "RH"} else ""
+            token = next(
+                (part for part in parts if part.lower().replace("_", "") in network_names),
+                "",
+            )
+            metadata[parcel_id] = {
+                "parcel_label": label,
+                "network": network_names.get(token.lower().replace("_", ""), token),
+                "hemisphere": hemisphere,
+            }
+        return metadata
+
     def roi_residual_timeseries(
         self,
         name: str,

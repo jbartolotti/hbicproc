@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from nilearn.image import load_img
+
 from ..models.canonical_glm import FittedModel
 from ..derivatives import DerivativePathBuilder
 from .atlas import AtlasCache
@@ -64,6 +66,7 @@ class ActivationAnalysis:
 
         outputs: list[ContrastOutput | AtlasOutput | ReportOutput] = []
         target_image = None
+        contrast_effect_paths: dict[str, Path] = {}
         for name, definition in contrasts.items():
             for output_type in output_types:
                 image = fitted.estimator.compute_contrast(
@@ -81,6 +84,8 @@ class ActivationAnalysis:
                 )
                 image.to_filename(path)
                 outputs.append(ContrastOutput(name, output_type, path))
+                if output_type == "effect_size":
+                    contrast_effect_paths[name] = path
 
         generate_report = getattr(fitted.estimator, "generate_report", None)
         if callable(generate_report):
@@ -161,6 +166,23 @@ class ActivationAnalysis:
                     )
                     cache.roi_activation_summary(str(atlas_name), condition_images, target_image, activation_path)
                     outputs.append(AtlasOutput(f"{atlas_name}:activation", activation_path))
+                if contrast_effect_paths:
+                    contrast_path = output_dir / DerivativePathBuilder.build_filename(
+                        subject=fitted.plan.context.subject,
+                        session=fitted.plan.context.session,
+                        task=fitted.plan.context.task,
+                        run=fitted.plan.context.run,
+                        desc=f"atlas-{atlas_text}-contrasts",
+                        suffix=".tsv",
+                    )
+                    contrast_images = {
+                        contrast: load_img(str(path))
+                        for contrast, path in contrast_effect_paths.items()
+                    }
+                    cache.roi_contrast_summary(
+                        str(atlas_name), contrast_images, target_image, contrast_path
+                    )
+                    outputs.append(AtlasOutput(f"{atlas_name}:contrasts", contrast_path))
                 if residuals:
                     residual_path = output_dir / DerivativePathBuilder.build_filename(
                         subject=fitted.plan.context.subject,

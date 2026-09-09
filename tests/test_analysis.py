@@ -301,6 +301,72 @@ def test_atlas_residual_timeseries_is_wide(tmp_path: Path) -> None:
     ]
 
 
+def test_atlas_contrast_summary_is_long_and_uses_parcel_metadata(tmp_path: Path) -> None:
+    atlas_path = tmp_path / "atlas.nii.gz"
+    atlas_data = np.array([[[1, 1]], [[2, 2]]], dtype=np.int16)
+    effect_one = np.array([[[2.0, 4.0]], [[6.0, 8.0]]])
+    effect_two = np.array([[[3.0, 5.0]], [[7.0, 9.0]]])
+    affine = np.eye(4)
+    nib.save(nib.Nifti1Image(atlas_data, affine), atlas_path)
+    cache = AtlasCache(tmp_path / "atlas-cache")
+    cache._atlases["test"] = Atlas(
+        name="test",
+        maps=atlas_path,
+        labels=("7Networks_LH_Default_PFC_1", "7Networks_RH_Vis_Visual_1"),
+    )
+    target = nib.Nifti1Image(np.zeros((2, 1, 2)), affine)
+    output_path = tmp_path / "contrasts.tsv"
+
+    cache.roi_contrast_summary(
+        "test",
+        {
+            "two_gt_one": nib.Nifti1Image(effect_one, affine),
+            "two_gt_baseline": nib.Nifti1Image(effect_two, affine),
+        },
+        target,
+        output_path,
+    )
+
+    table = pd.read_csv(output_path, sep="\t")
+    assert list(table.columns) == [
+        "parcel_id", "parcel_label", "network", "hemisphere", "contrast", "effect",
+    ]
+    assert table.to_dict("records") == [
+        {
+            "parcel_id": 1,
+            "parcel_label": "7Networks_LH_Default_PFC_1",
+            "network": "Default",
+            "hemisphere": "LH",
+            "contrast": "two_gt_one",
+            "effect": 3.0,
+        },
+        {
+            "parcel_id": 1,
+            "parcel_label": "7Networks_LH_Default_PFC_1",
+            "network": "Default",
+            "hemisphere": "LH",
+            "contrast": "two_gt_baseline",
+            "effect": 4.0,
+        },
+        {
+            "parcel_id": 2,
+            "parcel_label": "7Networks_RH_Vis_Visual_1",
+            "network": "Visual",
+            "hemisphere": "RH",
+            "contrast": "two_gt_one",
+            "effect": 7.0,
+        },
+        {
+            "parcel_id": 2,
+            "parcel_label": "7Networks_RH_Vis_Visual_1",
+            "network": "Visual",
+            "hemisphere": "RH",
+            "contrast": "two_gt_baseline",
+            "effect": 8.0,
+        },
+    ]
+
+
 def test_canonical_glm_rejects_missing_required_confounds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     events_path = tmp_path / "events.tsv"
     confounds_path = tmp_path / "confounds.tsv"
