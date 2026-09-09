@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ast
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -8,6 +10,9 @@ import numpy as np
 import pandas as pd
 from nilearn.datasets import fetch_atlas_schaefer_2018
 from nilearn.image import resample_to_img
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -107,14 +112,35 @@ class AtlasCache:
 
         atlas = self.get(name)
         atlas_image = resample_to_img(str(atlas.maps), target_img, interpolation="nearest")
-        labels = np.asarray(atlas_image.get_fdata())
+        labels = np.round(atlas_image.get_fdata()).astype(np.int32)
         metadata = self._parcel_metadata(atlas)
+        parcel_ids = sorted(int(value) for value in np.unique(labels) if value > 0)
+        max_parcel_id = max(parcel_ids, default=0)
+        missing_ids = [parcel_id for parcel_id in parcel_ids if parcel_id not in metadata]
+        network_count = sum(1 for parcel_id in parcel_ids if metadata.get(parcel_id, {}).get("network"))
+        LOGGER.info(
+            "Atlas contrast extraction metadata: atlas=%s labels=%d parcels=%d "
+            "network_labels=%d max_roi=%d",
+            name,
+            len(atlas.labels),
+            len(metadata),
+            network_count,
+            max_parcel_id,
+        )
+        if missing_ids:
+            raise ValueError(
+                f"Atlas '{name}' has no metadata for parcel IDs: {missing_ids}."
+            )
+        LOGGER.info("Atlas '%s' has metadata for all parcel IDs present in the image.", name)
+        contrast_data = {
+            contrast: np.asarray(image.get_fdata())
+            for contrast, image in contrast_images.items()
+        }
         rows = []
-        for roi in sorted(int(value) for value in np.unique(labels) if value > 0):
+        for roi in parcel_ids:
             mask = labels == roi
             parcel = metadata.get(roi, {"parcel_label": "", "network": "", "hemisphere": ""})
-            for contrast, image in contrast_images.items():
-                values = np.asarray(image.get_fdata())
+            for contrast, values in contrast_data.items():
                 rows.append({
                     "parcel_id": roi,
                     "parcel_label": parcel["parcel_label"],
@@ -133,6 +159,9 @@ class AtlasCache:
 
     @staticmethod
     def _parcel_metadata(atlas: Atlas) -> dict[int, dict[str, str]]:
+        labels = list(atlas.labels)
+        if labels and AtlasCache._normalize_label(labels[0]).lower() == "background":
+            labels = labels[1:]
         metadata = {}
         network_names = {
             "default": "Default",
@@ -148,8 +177,8 @@ class AtlasCache:
             "cont": "Frontoparietal",
             "frontoparietal": "Frontoparietal",
         }
-        for parcel_id, raw_label in enumerate(atlas.labels, start=1):
-            label = str(raw_label).strip().strip("b'").strip('"')
+        for parcel_id, raw_label in enumerate(labels, start=1):
+            label = AtlasCache._normalize_label(raw_label)
             parts = label.split("_")
             hemisphere = parts[1] if len(parts) > 1 and parts[1] in {"LH", "RH"} else ""
             token = next(
@@ -162,6 +191,22 @@ class AtlasCache:
                 "hemisphere": hemisphere,
             }
         return metadata
+
+    @staticmethod
+    def _normalize_label(raw_label: str | bytes) -> str:
+        """Normalize atlas labels without stripping valid leading/trailing characters."""
+
+        if isinstance(raw_label, bytes):
+            return raw_label.decode("utf-8", errors="replace")
+        label = str(raw_label)
+        if len(label) >= 3 and label[:2] in {"b'", 'b"'} and label[-1] == label[1]:
+            try:
+                decoded = ast.literal_eval(label)
+            except (SyntaxError, ValueError):
+                return label
+            if isinstance(decoded, bytes):
+                return decoded.decode("utf-8", errors="replace")
+        return label
 
     def roi_residual_timeseries(
         self,

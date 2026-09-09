@@ -312,7 +312,7 @@ def test_atlas_contrast_summary_is_long_and_uses_parcel_metadata(tmp_path: Path)
     cache._atlases["test"] = Atlas(
         name="test",
         maps=atlas_path,
-        labels=("7Networks_LH_Default_PFC_1", "7Networks_RH_Vis_Visual_1"),
+        labels=("Background", "7Networks_LH_Default_PFC_1", "7Networks_RH_Vis_Visual_1"),
     )
     target = nib.Nifti1Image(np.zeros((2, 1, 2)), affine)
     output_path = tmp_path / "contrasts.tsv"
