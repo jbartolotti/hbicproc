@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pipeline.processing.analysis.analyses.atlas import AtlasCache
+from pipeline.processing.analysis.analyses.atlas import Atlas, AtlasCache, AtlasParcel
 
 
 def _write_image(path: Path, data: np.ndarray) -> Path:
@@ -102,3 +102,21 @@ def test_coordinate_spheres_participate_in_contrast_extraction(tmp_path: Path) -
     assert table.loc[0, "parcel_label"] == "Left_DLPFC"
     assert table.loc[0, "network"] == "Executive"
     assert table.loc[0, "effect"] == 1.0
+
+
+def test_in_memory_atlas_maps_are_accepted(tmp_path: Path) -> None:
+    atlas = nib.Nifti1Image(np.array([[[1]]], dtype=np.int16), np.eye(4))
+    target = nib.Nifti1Image(np.zeros((1, 1, 1), dtype=float), np.eye(4))
+    effect = nib.Nifti1Image(np.array([[[2.5]]]), np.eye(4))
+    cache = AtlasCache(tmp_path / "cache")
+    cache._atlases["memory"] = Atlas(
+        name="memory",
+        maps=atlas,
+        metadata=(AtlasParcel(1, "Parcel", "memory"),),
+    )
+    output = tmp_path / "memory.tsv"
+
+    cache.roi_contrast_summary("memory", {"contrast": effect}, target, output)
+
+    table = pd.read_csv(output, sep="\t")
+    assert table.loc[0, "effect"] == 2.5

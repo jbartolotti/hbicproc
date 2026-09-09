@@ -14,7 +14,7 @@ from nilearn.datasets import (
     fetch_atlas_harvard_oxford,
     fetch_atlas_schaefer_2018,
 )
-from nilearn.image import new_img_like, resample_to_img
+from nilearn.image import load_img, new_img_like, resample_to_img
 
 
 LOGGER = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class Atlas:
     """An atlas image and optional labels resolved from the external cache."""
 
     name: str
-    maps: Path
+    maps: Any
     labels: tuple[str, ...] = ()
     metadata: tuple[AtlasParcel, ...] = ()
 
@@ -244,7 +244,7 @@ class AtlasCache:
         atlas = self._atlas_for(name, target_img)
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
-        resampled = resample_to_img(str(atlas.maps), target_img, interpolation="nearest")
+        resampled = resample_to_img(load_img(atlas.maps), target_img, interpolation="nearest")
         resampled.to_filename(output)
         return atlas
 
@@ -256,7 +256,7 @@ class AtlasCache:
         output_path: str | Path,
     ) -> Path:
         atlas = self._atlas_for(name, target_img)
-        atlas_image = resample_to_img(str(atlas.maps), target_img, interpolation="nearest")
+        atlas_image = resample_to_img(load_img(atlas.maps), target_img, interpolation="nearest")
         labels = np.round(atlas_image.get_fdata()).astype(np.int32)
         rows = []
         for roi in sorted(int(value) for value in np.unique(labels) if value > 0):
@@ -281,7 +281,7 @@ class AtlasCache:
         """Extract long-format parcel values from saved contrast effect images."""
 
         atlas = self._atlas_for(name, target_img)
-        atlas_image = resample_to_img(str(atlas.maps), target_img, interpolation="nearest")
+        atlas_image = resample_to_img(load_img(atlas.maps), target_img, interpolation="nearest")
         labels = np.round(atlas_image.get_fdata()).astype(np.int32)
         metadata = self._parcel_metadata(atlas)
         parcel_ids = sorted(int(value) for value in np.unique(labels) if value > 0)
@@ -395,7 +395,7 @@ class AtlasCache:
         output_path: str | Path,
     ) -> Path:
         atlas = self._atlas_for(name, target_img)
-        atlas_image = resample_to_img(str(atlas.maps), target_img, interpolation="nearest")
+        atlas_image = resample_to_img(load_img(atlas.maps), target_img, interpolation="nearest")
         labels = np.round(atlas_image.get_fdata()).astype(np.int32)
         rois = sorted(int(value) for value in np.unique(labels) if value > 0)
         rows = []
