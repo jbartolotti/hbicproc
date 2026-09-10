@@ -13,7 +13,7 @@ import nibabel as nib
 import numpy as np
 import pandas as pd
 from nilearn.image import new_img_like
-from nilearn.plotting.html_stat_map import html_stat_map
+from nilearn.plotting import view_img
 
 from ...core.paths import write_json
 from .base import QCReport, ReportResult
@@ -199,7 +199,7 @@ def _map_and_viewer(
         new_img_like(atlas_image, map_data).to_filename(map_path)
         viewer_path = output_dir / "viewers" / f"{stem}_correlation.html"
         viewer_path.parent.mkdir(parents=True, exist_ok=True)
-        viewer = html_stat_map(str(map_path), title=stem, threshold=0, cmap="RdBu_r", symmetric_cmap=True)
+        viewer = view_img(str(map_path), title=stem, threshold=0, cmap="RdBu_r", symmetric_cmap=True)
         viewer.save_as_html(str(viewer_path))
         return str(map_path), str(viewer_path)
     except Exception:
