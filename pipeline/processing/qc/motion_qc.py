@@ -137,6 +137,40 @@ def _run_table(runs: list[RunMotion], thresholds: dict[str, float]) -> pd.DataFr
     return pd.DataFrame([run.as_dict(thresholds) for run in runs])
 
 
+def load_motion_summary(context, report_config: dict[str, Any]) -> tuple[pd.DataFrame, list[str], list[str]]:
+    """Load the canonical run-level motion metrics used by motion_qc."""
+
+    thresholds = _thresholds(report_config)
+    input_dataset_config = report_config.get("input_dataset") or context.config["analysis"]["input_dataset"]
+    dataset = InputDataset(str(input_dataset_config["name"]), Path(input_dataset_config["path"]))
+    confounds_files = context.dataset_index.get_confounds_files(input_dataset=dataset)
+    runs: list[RunMotion] = []
+    source_files: list[str] = []
+    warnings: list[str] = []
+    for path in confounds_files:
+        entities = _entities_from_path(path)
+        subject = entities["subject"]
+        if subject is None:
+            warnings.append(f"Could not determine subject from {path}")
+            continue
+        try:
+            confounds = pd.read_csv(path, sep="\t")
+        except Exception as exc:
+            warnings.append(f"Could not read {path}: {exc}")
+            continue
+        if "framewise_displacement" not in confounds.columns:
+            warnings.append(f"Missing framewise_displacement column in {path}")
+            continue
+        displacement = pd.to_numeric(confounds["framewise_displacement"], errors="coerce").fillna(0.0)
+        values = displacement.astype(float).tolist()
+        if not values:
+            warnings.append(f"No framewise displacement volumes in {path}")
+            continue
+        runs.append(RunMotion(subject, entities["session"], entities["task"], entities["run"], path, values))
+        source_files.append(str(path))
+    return _run_table(runs, thresholds), source_files, warnings
+
+
 def _flagged_table(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
         return frame

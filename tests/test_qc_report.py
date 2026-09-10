@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import nibabel as nib
+import numpy as np
 import pytest
 
 from pipeline.cli import _build_parser
@@ -103,3 +105,68 @@ def test_motion_qc_skips_when_confounds_are_unavailable(tmp_path: Path, monkeypa
 
     assert result["success"] is True
     assert result["details"]["reports"][0]["status"] == "skipped"
+
+
+def test_contrast_motion_qc_discovers_contrasts_and_generates_maps(tmp_path: Path, monkeypatch) -> None:
+    analysis_root = tmp_path / "derivatives" / "hbicproc"
+    fmriprep_root = tmp_path / "derivatives" / "fmriprep"
+    analysis_root.mkdir(parents=True)
+    fmriprep_root.mkdir(parents=True)
+    atlas = nib.Nifti1Image(np.array([[[1, 2, 1]]], dtype=np.int16), np.eye(4))
+
+    confounds = []
+    for index, subject in enumerate(("001", "002", "003"), start=1):
+        confounds_path = fmriprep_root / f"sub-{subject}_task-nback_run-1_desc-confounds_timeseries.tsv"
+        confounds_path.write_text(
+            f"framewise_displacement\n{0.05 * index}\n{0.1 * index}\n", encoding="utf-8"
+        )
+        confounds.append(confounds_path)
+        contrast_path = analysis_root / f"sub-{subject}_task-nback_run-1_desc-atlas-test-contrasts.tsv"
+        contrast_path.write_text(
+            "parcel_id\tparcel_label\tnetwork\themisphere\tcontrast\teffect\n"
+            f"1\tParcel1\tDefault\tLH\tcondition_a\t{index}.0\n"
+            f"2\tParcel2\tVisual\tRH\tcondition_a\t{4 - index}.0\n",
+            encoding="utf-8",
+        )
+        nib.save(atlas, contrast_path.with_name(contrast_path.name.replace("-contrasts.tsv", "-resampled.nii.gz")))
+
+    class FakeDatasetIndex:
+        @classmethod
+        def from_config(cls, config):
+            return cls()
+
+        def get_confounds_files(self, *, input_dataset):
+            return confounds
+
+    monkeypatch.setattr(service, "DatasetIndex", FakeDatasetIndex)
+    config = {
+        "log_dir": str(tmp_path / "logs"),
+        "analysis": {
+            "output_dir": str(analysis_root),
+            "input_dataset": {"name": "fmriprep", "path": str(fmriprep_root)},
+        },
+        "qc_report": {
+            "enabled": True,
+            "output_dir": str(tmp_path / "qc_report"),
+            "reports": {
+                "contrast_motion_qc": {
+                    "enabled": True,
+                    "atlases": ["test"],
+                    "motion_metrics": ["mean_fd"],
+                }
+            },
+        },
+    }
+
+    result = service.run_reports(config)
+
+    assert result["success"] is True
+    report_root = tmp_path / "qc_report" / "contrast_motion_qc"
+    metadata = json.loads((report_root / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["atlases"] == ["test"]
+    assert metadata["contrasts"] == ["condition_a"]
+    assert metadata["subject_count"] == 3
+    assert metadata["run_count"] == 3
+    assert list((report_root / "maps").glob("*.nii.gz"))
+    assert list((report_root / "viewers").glob("*.html"))
+    assert (report_root / "report.html").exists()

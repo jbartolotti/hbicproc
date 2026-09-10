@@ -20,5 +20,6 @@ def register_report(report_class: Type[QCReport]) -> Type[QCReport]:
 
 def get_report_classes() -> dict[str, Type[QCReport]]:
     from . import motion_qc  # noqa: F401
+    from . import contrast_motion_qc  # noqa: F401
 
     return dict(REPORT_CLASSES)

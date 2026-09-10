@@ -210,6 +210,34 @@ def validate_config(config):
                             raise ValueError(
                                 f"qc_report.reports.{report_name}.fd_thresholds.{threshold_name} must be non-negative."
                             ) from None
+            if report_name == "contrast_motion_qc":
+                motion_metrics = report_config.get("motion_metrics", [])
+                if isinstance(motion_metrics, str):
+                    motion_metrics = [motion_metrics]
+                if not isinstance(motion_metrics, list) or not all(str(item).strip() for item in motion_metrics):
+                    raise ValueError("qc_report.reports.contrast_motion_qc.motion_metrics must be a list of names.")
+                atlases = report_config.get("atlases", [])
+                if isinstance(atlases, str):
+                    atlases = [atlases]
+                if not isinstance(atlases, list) or not all(str(item).strip() for item in atlases):
+                    raise ValueError("qc_report.reports.contrast_motion_qc.atlases must be a list of names.")
+                parcel_thresholds = report_config.get("parcel_thresholds", {})
+                if not isinstance(parcel_thresholds, dict):
+                    raise ValueError("qc_report.reports.contrast_motion_qc.parcel_thresholds must be an object.")
+                for threshold_name in ("warning", "severe"):
+                    if threshold_name in parcel_thresholds:
+                        try:
+                            if float(parcel_thresholds[threshold_name]) < 0:
+                                raise ValueError
+                        except (TypeError, ValueError):
+                            raise ValueError(
+                                f"qc_report.reports.contrast_motion_qc.parcel_thresholds.{threshold_name} must be non-negative."
+                            ) from None
+                if all(name in parcel_thresholds for name in ("warning", "severe")):
+                    if float(parcel_thresholds["warning"]) > float(parcel_thresholds["severe"]):
+                        raise ValueError(
+                            "qc_report.reports.contrast_motion_qc.parcel_thresholds.warning must not exceed severe."
+                        )
             if "input_dataset" in report_config:
                 _validate_input_dataset(
                     report_config["input_dataset"],

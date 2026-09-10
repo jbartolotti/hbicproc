@@ -189,3 +189,10 @@ qc_report:
       # input_dataset:
       #   name: fmriprep
       #   path: derivatives/fmriprep
+    contrast_motion_qc:
+      enabled: false
+      motion_metrics: [mean_fd, median_fd, pct_fd_02, pct_fd_05]
+      atlases: []
+      parcel_thresholds:
+        warning: 0.20
+        severe: 0.30
