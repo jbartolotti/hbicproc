@@ -269,7 +269,7 @@ class ContrastMotionQCReport(QCReport):
                     )
                     stats["flagged"] = bool(flag)
                     logger.info("Computed parcel correlations: atlas=%s contrast=%s metric=%s parcels=%d", atlas, contrast, metric, len(parcel_frame))
-                    figure, axis = _histogram(parcel_frame["correlation"], atlas, contrast, metric, figure_dir, thresholds)
+                    figure = _histogram(parcel_frame["correlation"], atlas, contrast, metric, figure_dir, thresholds)
                     histogram_files.append(figure)
                     source_path = str(contrast_data_one["source_path"].iloc[0])
                     map_stem = f"{_safe_component(atlas)}_{_safe_component(contrast)}_{_safe_component(metric)}"
