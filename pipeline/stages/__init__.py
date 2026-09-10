@@ -7,6 +7,7 @@ from .qc import QcStage
 from .qc_review import QcReviewStage
 from .validate import ValidateStage
 from .group import GroupStage
+from .qc_report import QCReportStage
 
 STAGE_CLASSES = {
     "download": DownloadStage,
@@ -18,4 +19,5 @@ STAGE_CLASSES = {
     "analysis": AnalysisStage,
     "behavior": BehaviorStage,
     "group": GroupStage,
+    "qc_report": QCReportStage,
 }

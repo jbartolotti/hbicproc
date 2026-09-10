@@ -316,6 +316,25 @@ class DatasetIndex:
         self._task_runs_cache[cache_key] = resolved_runs
         return list(resolved_runs)
 
+    def get_confounds_files(
+        self,
+        *,
+        subject: str | None = None,
+        input_dataset: InputDataset | None = None,
+    ) -> list[Path]:
+        """Return fMRIPrep-style confounds TSV files from a derivative dataset."""
+
+        selected_dataset = input_dataset or self.input_dataset
+        layout = self._get_derivative_layout(Path(selected_dataset.path), selected_dataset.name)
+        records = self._query(
+            layout,
+            suffix="timeseries",
+            desc="confounds",
+            extension=".tsv",
+            subject=_normalize_entity_text(subject, prefix="sub") if subject else None,
+        )
+        return sorted(Path(str(record.path)) for record in records)
+
     def _get_derivative_layout(self, derivative_root: Path, index_name: str | None = None) -> BIDSLayout | None:
         if derivative_root not in self._derivative_layouts:
             self._derivative_layouts[derivative_root] = self._build_derivative_layout(

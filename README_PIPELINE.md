@@ -16,6 +16,7 @@ hbicproc exclude sub-001 --run task-nback_run-2
 hbicproc preprocess sub-001
 hbicproc analysis sub-001
 hbicproc behavior sub-001 --task stroop
+hbicproc qc_report
 hbicproc run sub-001
 hbicproc status
 ```
@@ -145,6 +146,13 @@ sourcedata/sub-001/ses-T2
 ## MRIQC
 
 The QC stage runs participant-level MRIQC and prints the exact next command for human review.
+
+## QC reports
+
+`hbicproc qc_report` is a global reporting stage that consumes existing derivatives. The initial
+`motion_qc` report reads fMRIPrep confounds files, calculates each subject's mean
+`framewise_displacement`, and writes an independently openable HTML report and PNG plot under
+`derivatives/hbicproc/qc_report/motion_qc/`. The top-level `index.html` links to enabled reports.
 
 ## Behavioral events configuration
 

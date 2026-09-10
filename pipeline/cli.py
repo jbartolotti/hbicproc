@@ -118,10 +118,10 @@ def _subject_exclusion(subject, config, runs, clear):
 def _handle_stage(parser, args, config):
     stage_name = args.command
 
-    if stage_name == "group":
-        from .stages.group import GroupStage
+    if stage_name in {"group", "qc_report"}:
+        stage_class = STAGE_CLASSES[stage_name]
 
-        result = GroupStage().run(None, config, {}, dry_run=args.dry_run, rerun=args.rerun)
+        result = stage_class().run(None, config, {}, dry_run=args.dry_run, rerun=args.rerun)
         _print_result(result)
         return 0 if result.success else 1
 
@@ -211,12 +211,14 @@ def _build_parser():
 
     for stage_name in STAGE_CLASSES:
         stage_help = (
-            "Run the global group analyses."
+            "Run a global QC report."
+            if stage_name == "qc_report"
+            else "Run the global group analyses."
             if stage_name == "group"
             else f"Run the {stage_name} stage for a subject."
         )
         stage_parser = subparsers.add_parser(stage_name, help=stage_help)
-        if stage_name != "group":
+        if stage_name not in {"group", "qc_report"}:
             stage_parser.add_argument("subject", nargs="?", help="Participant label, e.g. sub-011.")
             stage_parser.add_argument(
                 "--all",

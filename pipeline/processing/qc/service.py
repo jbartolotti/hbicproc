@@ -1,3 +1,112 @@
+from __future__ import annotations
+
+import html
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from ...core.paths import write_json
+from ...logger import append_event
+from ..analysis.dataset import DatasetIndex
+from .base import ReportResult
+from .registry import get_report_classes
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class QCReportContext:
+    config: dict[str, Any]
+    output_dir: Path
+    report_name: str
+    report_config: dict[str, Any]
+    dataset_index: DatasetIndex
+
+
+def _normalized_reports(value: Any) -> dict[str, dict[str, Any]]:
+    if isinstance(value, list):
+        return {str(name): {"enabled": True} for name in value}
+    if isinstance(value, dict):
+        return {str(name): dict(settings) for name, settings in value.items()}
+    return {}
+
+
+def _write_index(output_dir: Path, results: list[ReportResult]) -> None:
+    rows = []
+    for result in results:
+        report_link = f"{result.name}/report.html" if result.status == "completed" else ""
+        link = f"<a href='{html.escape(report_link)}'>open report</a>" if report_link else ""
+        rows.append(
+            f"<tr><td>{html.escape(result.name)}</td><td>{html.escape(result.status)}</td>"
+            f"<td>{link}</td><td>{html.escape(result.message)}</td></tr>"
+        )
+    (output_dir / "index.html").write_text(
+        "<!doctype html><html><head><meta charset='utf-8'><title>QC reports</title></head><body>"
+        "<h1>QC reports</h1><table><thead><tr><th>Report</th><th>Status</th>"
+        f"<th>Link</th><th>Message</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
+        "</body></html>\n",
+        encoding="utf-8",
+    )
+
+
+def run_reports(config: dict[str, Any], *, dry_run: bool = False, rerun: bool = False) -> dict[str, Any]:
+    qc_config = config.get("qc_report", {})
+    if not qc_config.get("enabled", True):
+        return {"success": True, "skipped": True, "message": "QC reporting is disabled."}
+
+    output_dir = Path(qc_config["output_dir"])
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if dry_run:
+        return {"success": True, "message": "QC report dry run completed.", "details": {"output_dir": str(output_dir)}}
+
+    reports = _normalized_reports(qc_config.get("reports", {}))
+    report_classes = get_report_classes()
+    try:
+        dataset_index = DatasetIndex.from_config(config)
+    except Exception as exc:
+        return {"success": False, "message": f"Could not initialize QC dataset index: {exc}"}
+
+    results: list[ReportResult] = []
+    for report_name, report_config in reports.items():
+        if not report_config.get("enabled", True):
+            continue
+        report_class = report_classes.get(report_name)
+        if report_class is None:
+            logger.warning("QC report '%s' is not registered; skipping.", report_name)
+            results.append(ReportResult(report_name, "skipped", f"Unknown QC report '{report_name}'."))
+            continue
+        context = QCReportContext(config, output_dir, report_name, report_config, dataset_index)
+        append_event(f"QC report started: {report_name}", config, step="qc_report")
+        try:
+            result = report_class().generate(context)
+        except Exception as exc:
+            logger.exception("QC report '%s' failed", report_name)
+            result = ReportResult(report_name, "failed", f"QC report failed: {exc}")
+        results.append(result)
+        append_event(f"QC report {result.status}: {report_name}", config, step="qc_report")
+
+    _write_index(output_dir, results)
+    manifest = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "reports": [
+            {"name": result.name, "status": result.status, "message": result.message}
+            for result in results
+        ],
+        "output_dir": str(output_dir),
+        "rerun": rerun,
+    }
+    write_json(output_dir / "manifest.json", manifest)
+    failed = [result for result in results if result.status == "failed"]
+    skipped = [result for result in results if result.status == "skipped"]
+    message = f"QC reporting completed: {len(results) - len(failed) - len(skipped)} generated, {len(skipped)} skipped, {len(failed)} failed."
+    return {
+        "success": not failed,
+        "message": message,
+        "details": {"manifest": str(output_dir / "manifest.json"), "reports": manifest["reports"]},
+    }
+
 from pathlib import Path
 import shutil
 

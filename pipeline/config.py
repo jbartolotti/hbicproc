@@ -116,12 +116,21 @@ def _apply_defaults(config):
             "reader_backend": "auto",
             "verbose": False
         },
+        "qc_report": {
+            "enabled": True,
+            "output_dir": "derivatives/hbicproc/qc_report",
+            "reports": {
+                "motion_qc": {
+                    "enabled": True
+                }
+            }
+        },
         "group": {}
     }
 
     merged = _deep_merge(defaults, config)
 
-    for key in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc", "analysis", "behavior", "group"]:
+    for key in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc", "analysis", "behavior", "qc_report", "group"]:
         merged[key] = _deep_merge(defaults.get(key, {}), config.get(key, {}))
 
     user_tokens = config.get("tokens", {})
@@ -170,6 +179,31 @@ def validate_config(config):
     input_dataset = analysis.get("input_dataset")
     _validate_input_dataset(input_dataset, field_name="analysis.input_dataset")
     _validate_atlases(analysis.get("atlases", []), field_name="analysis.atlases")
+
+    qc_report = config.get("qc_report", {})
+    if not isinstance(qc_report, dict):
+        raise ValueError("The 'qc_report' configuration must be an object.")
+    if not isinstance(qc_report.get("enabled", True), bool):
+        raise ValueError("qc_report.enabled must be a boolean.")
+    if not str(qc_report.get("output_dir", "")).strip():
+        raise ValueError("qc_report.output_dir must not be empty.")
+    reports = qc_report.get("reports", {})
+    if isinstance(reports, list):
+        if not all(isinstance(name, str) and name.strip() for name in reports):
+            raise ValueError("qc_report.reports list entries must be non-empty names.")
+    elif isinstance(reports, dict):
+        for report_name, report_config in reports.items():
+            if not str(report_name).strip() or not isinstance(report_config, dict):
+                raise ValueError("qc_report.reports entries must be named objects.")
+            if not isinstance(report_config.get("enabled", True), bool):
+                raise ValueError(f"qc_report.reports.{report_name}.enabled must be a boolean.")
+            if "input_dataset" in report_config:
+                _validate_input_dataset(
+                    report_config["input_dataset"],
+                    field_name=f"qc_report.reports.{report_name}.input_dataset",
+                )
+    else:
+        raise ValueError("qc_report.reports must be a mapping or list of report names.")
 
     subject = analysis.get("subject")
     if not isinstance(subject, dict):
@@ -304,7 +338,7 @@ def _resolve_paths(config, root_dir):
     if config.get("bids_root"):
         config["bids_root"] = str(_resolve_path(config["bids_root"], root_dir, study_root))
 
-    for section in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc", "analysis", "behavior"]:
+    for section in ["xnat", "bidskit", "mriqc", "fmriprep", "hbicproc", "analysis", "behavior", "qc_report"]:
         section_data = config.get(section, {})
         _resolve_nested_paths(section_data, root_dir, study_root)
         config[section] = section_data

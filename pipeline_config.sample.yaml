@@ -174,3 +174,15 @@ behavior:
   output_dir: derivatives/behavior/events
   reader_backend: auto
   verbose: false
+
+qc_report:
+  # Global derivative reports. Reports consume existing derivatives and do not rerun preprocessing.
+  enabled: true
+  output_dir: derivatives/hbicproc/qc_report
+  reports:
+    motion_qc:
+      enabled: true
+      # Optional; defaults to analysis.input_dataset.
+      # input_dataset:
+      #   name: fmriprep
+      #   path: derivatives/fmriprep
