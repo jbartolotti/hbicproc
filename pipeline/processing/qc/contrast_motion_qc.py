@@ -13,7 +13,7 @@ import nibabel as nib
 import numpy as np
 import pandas as pd
 from nilearn.image import new_img_like
-from nilearn.plotting import html_stat_map
+from nilearn.plotting.html_stat_map import html_stat_map
 
 from ...core.paths import write_json
 from .base import QCReport, ReportResult
