@@ -197,6 +197,19 @@ def validate_config(config):
                 raise ValueError("qc_report.reports entries must be named objects.")
             if not isinstance(report_config.get("enabled", True), bool):
                 raise ValueError(f"qc_report.reports.{report_name}.enabled must be a boolean.")
+            if "fd_thresholds" in report_config:
+                thresholds = report_config["fd_thresholds"]
+                if not isinstance(thresholds, dict):
+                    raise ValueError(f"qc_report.reports.{report_name}.fd_thresholds must be an object.")
+                for threshold_name in ("warning", "severe"):
+                    if threshold_name in thresholds:
+                        try:
+                            if float(thresholds[threshold_name]) < 0:
+                                raise ValueError
+                        except (TypeError, ValueError):
+                            raise ValueError(
+                                f"qc_report.reports.{report_name}.fd_thresholds.{threshold_name} must be non-negative."
+                            ) from None
             if "input_dataset" in report_config:
                 _validate_input_dataset(
                     report_config["input_dataset"],

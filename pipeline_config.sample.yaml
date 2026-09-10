@@ -182,6 +182,9 @@ qc_report:
   reports:
     motion_qc:
       enabled: true
+      fd_thresholds:
+        warning: 0.2
+        severe: 0.5
       # Optional; defaults to analysis.input_dataset.
       # input_dataset:
       #   name: fmriprep

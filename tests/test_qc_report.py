@@ -15,12 +15,12 @@ def test_qc_report_is_registered_as_global_cli_stage() -> None:
 
 
 def test_motion_qc_generates_subject_mean_fd_report(tmp_path: Path, monkeypatch) -> None:
-    confounds_one = tmp_path / "derivatives" / "fmriprep" / "sub-002" / "func" / "sub-002_task-rest_desc-confounds_timeseries.tsv"
-    confounds_two = tmp_path / "derivatives" / "fmriprep" / "sub-001" / "func" / "sub-001_task-rest_desc-confounds_timeseries.tsv"
+    confounds_one = tmp_path / "derivatives" / "fmriprep" / "sub-002" / "ses-baseline" / "func" / "sub-002_ses-baseline_task-rest_run-1_desc-confounds_timeseries.tsv"
+    confounds_two = tmp_path / "derivatives" / "fmriprep" / "sub-001" / "ses-baseline" / "func" / "sub-001_ses-baseline_task-rest_run-1_desc-confounds_timeseries.tsv"
     confounds_one.parent.mkdir(parents=True)
     confounds_two.parent.mkdir(parents=True)
     confounds_one.write_text("framewise_displacement\n0.1\n0.3\n", encoding="utf-8")
-    confounds_two.write_text("framewise_displacement\n0.2\n0.4\n", encoding="utf-8")
+    confounds_two.write_text("framewise_displacement\n0.2\nNaN\n0.4\n", encoding="utf-8")
 
     class FakeDatasetIndex:
         @classmethod
@@ -43,7 +43,12 @@ def test_motion_qc_generates_subject_mean_fd_report(tmp_path: Path, monkeypatch)
         "qc_report": {
             "enabled": True,
             "output_dir": str(tmp_path / "qc_report"),
-            "reports": {"motion_qc": {"enabled": True}},
+            "reports": {
+                "motion_qc": {
+                    "enabled": True,
+                    "fd_thresholds": {"warning": 0.2, "severe": 0.5},
+                }
+            },
         },
     }
 
@@ -53,11 +58,21 @@ def test_motion_qc_generates_subject_mean_fd_report(tmp_path: Path, monkeypatch)
     metadata = json.loads(
         (tmp_path / "qc_report" / "motion_qc" / "metadata.json").read_text(encoding="utf-8")
     )
-    assert metadata["mean_framewise_displacement"] == pytest.approx(
-        {"sub-001": 0.3, "sub-002": 0.2}
-    )
+    assert metadata["number_of_runs_analyzed"] == 2
+    assert metadata["number_of_subjects_analyzed"] == 2
+    assert metadata["summary"]["total runs"] == 2
+    assert metadata["summary"]["overall mean FD"] == pytest.approx(0.2)
+    assert metadata["summary"]["runs with >10% FD > 0.20"] == 2
+    assert metadata["summary"]["runs with >10% FD > 0.50"] == 0
     assert (tmp_path / "qc_report" / "motion_qc" / "report.html").exists()
-    assert (tmp_path / "qc_report" / "motion_qc" / "figures" / "mean_framewise_displacement.png").exists()
+    assert (tmp_path / "qc_report" / "motion_qc" / "figures" / "mean_fd_histogram.png").exists()
+    assert (tmp_path / "qc_report" / "motion_qc" / "figures" / "pct_fd_02_histogram.png").exists()
+    assert (tmp_path / "qc_report" / "motion_qc" / "figures" / "pct_fd_05_histogram.png").exists()
+    assert len(list((tmp_path / "qc_report" / "motion_qc" / "figures" / "fd_traces").glob("*.png"))) == 2
+    assert len(list((tmp_path / "qc_report" / "motion_qc" / "figures" / "sorted_fd").glob("*.png"))) == 1
+    report_html = (tmp_path / "qc_report" / "motion_qc" / "report.html").read_text(encoding="utf-8")
+    assert "Ranked Runs" in report_html
+    assert "Flagged Runs" in report_html
     assert (tmp_path / "qc_report" / "index.html").exists()
     assert (tmp_path / "qc_report" / "manifest.json").exists()
 
