@@ -166,11 +166,14 @@ def _handle_status(args, config):
     return 0
 
 
-def _handle_index(config):
+def _handle_index(config, dataset_name=None):
     from .processing.analysis.dataset import regenerate_cached_indexes
 
-    regenerate_cached_indexes(config)
-    print("Regenerated cached PyBIDS indexes.")
+    regenerate_cached_indexes(config, dataset_name=dataset_name)
+    if dataset_name:
+        print(f"Regenerated cached PyBIDS index: {dataset_name}.")
+    else:
+        print("Regenerated cached PyBIDS indexes.")
     return 0
 
 
@@ -241,7 +244,14 @@ def _build_parser():
         help="Optional path to save the status figure.",
     )
 
-    subparsers.add_parser("index", help="Regenerate all configured cached PyBIDS indexes.")
+    index_parser = subparsers.add_parser(
+        "index", help="Regenerate cached PyBIDS indexes."
+    )
+    index_parser.add_argument(
+        "--dataset",
+        metavar="NAME",
+        help="Regenerate only the named index, such as raw or fmriprep.",
+    )
 
     run_parser = subparsers.add_parser("run", help="Resume the pipeline from the last incomplete stage.")
     run_parser.add_argument("subject", nargs="?", help="Participant label, e.g. sub-011. Omit to run all subjects.")
@@ -291,7 +301,7 @@ def main(argv=None):
         return _handle_status(args, config)
 
     if args.command == "index":
-        return _handle_index(config)
+        return _handle_index(config, dataset_name=args.dataset)
 
     if args.command == "run":
         return _handle_run(parser, args, config)

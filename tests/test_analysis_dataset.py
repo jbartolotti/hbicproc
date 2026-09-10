@@ -5,9 +5,98 @@ import logging
 from pathlib import Path
 
 from pipeline.processing.analysis import InputDataset, TaskRunContext
-from pipeline.processing.analysis.dataset import DatasetIndex
+from pipeline.processing.analysis.dataset import DatasetIndex, regenerate_cached_indexes
 from pipeline.state import invalidate_bids_index
 from pipeline.processing.analysis.derivatives import DerivativePathBuilder
+from pipeline.cli import _build_parser
+
+
+def test_index_cli_accepts_dataset_selector() -> None:
+    args = _build_parser().parse_args(["index", "--dataset", "raw"])
+
+    assert args.dataset == "raw"
+
+
+def test_regenerate_cached_indexes_can_select_one_dataset(tmp_path: Path, monkeypatch) -> None:
+    config = {
+        "bids_root": str(tmp_path),
+        "analysis": {
+            "input_dataset": {
+                "name": "fmriprep",
+                "path": str(tmp_path / "derivatives" / "fmriprep"),
+            }
+        },
+    }
+    invalidated = []
+    constructed = []
+
+    class FakeDatasetIndex:
+        @classmethod
+        def from_config(cls, config, **kwargs):
+            constructed.append(kwargs)
+
+    monkeypatch.setattr("pipeline.processing.analysis.dataset.DatasetIndex", FakeDatasetIndex)
+    monkeypatch.setattr(
+        "pipeline.processing.analysis.dataset.invalidate_bids_index",
+        lambda name, root: invalidated.append((name, root)),
+    )
+
+    regenerate_cached_indexes(config, dataset_name="raw")
+    assert invalidated == [("raw", tmp_path)]
+    assert constructed == [{"build_raw_index": True, "build_derivative_index": False}]
+
+    invalidated.clear()
+    constructed.clear()
+    regenerate_cached_indexes(config, dataset_name="fmriprep")
+    assert invalidated == [("fmriprep", tmp_path)]
+    assert constructed == [{
+        "task_config": {"input_dataset": config["analysis"]["input_dataset"]},
+        "build_raw_index": False,
+        "build_derivative_index": True,
+    }]
+
+
+def test_regenerate_cached_indexes_rejects_unknown_dataset(tmp_path: Path) -> None:
+    config = {
+        "bids_root": str(tmp_path),
+        "analysis": {
+            "input_dataset": {"name": "fmriprep", "path": str(tmp_path / "fmriprep")}
+        },
+    }
+
+    try:
+        regenerate_cached_indexes(config, dataset_name="missing")
+    except ValueError as exc:
+        assert "Unknown dataset 'missing'" in str(exc)
+    else:
+        raise AssertionError("Expected an unknown dataset selector to fail.")
+
+
+def test_regenerate_cached_indexes_defaults_to_all(tmp_path: Path, monkeypatch) -> None:
+    config = {
+        "bids_root": str(tmp_path),
+        "analysis": {
+            "input_dataset": {"name": "fmriprep", "path": str(tmp_path / "fmriprep")}
+        },
+    }
+    invalidated = []
+    constructed = []
+
+    class FakeDatasetIndex:
+        @classmethod
+        def from_config(cls, config, **kwargs):
+            constructed.append(kwargs)
+
+    monkeypatch.setattr("pipeline.processing.analysis.dataset.DatasetIndex", FakeDatasetIndex)
+    monkeypatch.setattr(
+        "pipeline.processing.analysis.dataset.invalidate_bids_index",
+        lambda name, root: invalidated.append(name),
+    )
+
+    regenerate_cached_indexes(config)
+
+    assert invalidated == ["raw", "fmriprep"]
+    assert constructed == [{}, {"task_config": {"input_dataset": config["analysis"]["input_dataset"]}}]
 
 
 def test_dataset_index_resolves_runs_from_configured_input_dataset(tmp_path: Path) -> None:

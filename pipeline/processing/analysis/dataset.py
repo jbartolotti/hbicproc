@@ -57,6 +57,8 @@ class DatasetIndex:
         *,
         study_root: str | Path | None = None,
         input_dataset: InputDataset | None = None,
+        build_raw_index: bool = True,
+        build_derivative_index: bool = True,
     ) -> None:
         root = Path(bids_root) if bids_root is not None else (Path(study_root) if study_root is not None else Path("."))
         self.bids_root = root.resolve() if root.exists() else root
@@ -80,7 +82,7 @@ class DatasetIndex:
             self.bids_root,
             self.derivative_root,
         )
-        if self.bids_root.exists():
+        if build_raw_index and self.bids_root.exists():
             try:
                 self.layout = self._build_cached_layout(
                     self.bids_root,
@@ -90,7 +92,7 @@ class DatasetIndex:
                 )
             except Exception:
                 self.layout = None
-        if self.derivative_root.exists():
+        if build_derivative_index and self.derivative_root.exists():
             self.derivative_layout = self._build_derivative_layout(self.derivative_root)
         self._derivative_layouts[self.derivative_root] = self.derivative_layout
         logger.info(
@@ -105,6 +107,8 @@ class DatasetIndex:
         config: dict[str, Any],
         *,
         task_config: dict[str, Any] | None = None,
+        build_raw_index: bool = True,
+        build_derivative_index: bool = True,
     ) -> "DatasetIndex":
         bids_root = config.get("bids_root") or config.get("study_root") or "."
         study_root = config.get("study_root") or bids_root
@@ -122,6 +126,8 @@ class DatasetIndex:
             bids_root=bids_root,
             study_root=study_root,
             input_dataset=InputDataset(dataset_name, Path(dataset_path)),
+            build_raw_index=build_raw_index,
+            build_derivative_index=build_derivative_index,
         )
 
     def get_task_runs(
@@ -563,8 +569,10 @@ def get_dataset_index(config: dict[str, Any]) -> DatasetIndex:
     return DatasetIndex.from_config(config)
 
 
-def regenerate_cached_indexes(config: dict[str, Any]) -> None:
-    """Rebuild the raw and configured derivative PyBIDS indexes."""
+def regenerate_cached_indexes(
+    config: dict[str, Any], *, dataset_name: str | None = None
+) -> None:
+    """Rebuild all indexes or only the selected raw/derivative index."""
 
     bids_root = get_bids_root(config)
     datasets: dict[tuple[str, str], dict[str, str]] = {}
@@ -595,6 +603,34 @@ def regenerate_cached_indexes(config: dict[str, Any]) -> None:
                 dataset = task_config.get("input_dataset")
                 if isinstance(dataset, dict):
                     datasets[(str(dataset.get("name", "")), str(dataset.get("path", "")))] = dataset
+
+    selected_name = dataset_name.strip() if dataset_name is not None else None
+    if selected_name:
+        if selected_name == "raw":
+            invalidate_bids_index("raw", bids_root)
+            DatasetIndex.from_config(
+                config,
+                build_raw_index=True,
+                build_derivative_index=False,
+            )
+            return
+        selected_dataset = next(
+            (dataset for (name, _path), dataset in datasets.items() if name == selected_name),
+            None,
+        )
+        if selected_dataset is None:
+            available = ["raw", *sorted(name for name, _path in datasets if name)]
+            raise ValueError(
+                f"Unknown dataset '{selected_name}'. Available datasets: {', '.join(available)}."
+            )
+        invalidate_bids_index(selected_name, bids_root)
+        DatasetIndex.from_config(
+            config,
+            task_config={"input_dataset": selected_dataset},
+            build_raw_index=False,
+            build_derivative_index=True,
+        )
+        return
 
     invalidate_bids_index("raw", bids_root)
     for name, _path in datasets:

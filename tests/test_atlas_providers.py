@@ -41,7 +41,7 @@ def test_builtin_atlas_providers_use_cached_fetchers(tmp_path: Path, monkeypatch
 
     assert cortical.metadata[0].parcel_id == 1
     assert cortical.metadata[0].parcel_label == "Left Hippocampus"
-    assert subcortical.maps == source
+    assert Path(subcortical.maps) == source
     assert aal_atlas.metadata[0].parcel_label == "Left Hippocampus"
     assert calls[0][1] == "cort-maxprob-thr25-2mm"
     assert calls[1][1] == "sub-maxprob-thr25-2mm"
