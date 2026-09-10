@@ -122,6 +122,11 @@ def _apply_defaults(config):
             "reports": {
                 "motion_qc": {
                     "enabled": True
+                },
+                "mask_qc": {
+                    "enabled": False,
+                    "rare_voxel_threshold_pct": 10,
+                    "montage_slices": 12
                 }
             }
         },
@@ -238,6 +243,24 @@ def validate_config(config):
                         raise ValueError(
                             "qc_report.reports.contrast_motion_qc.parcel_thresholds.warning must not exceed severe."
                         )
+            if report_name == "mask_qc":
+                if "rare_voxel_threshold_pct" in report_config:
+                    try:
+                        threshold_pct = float(report_config["rare_voxel_threshold_pct"])
+                        if threshold_pct <= 0 or threshold_pct > 100:
+                            raise ValueError
+                    except (TypeError, ValueError):
+                        raise ValueError(
+                            "qc_report.reports.mask_qc.rare_voxel_threshold_pct must be greater than 0 and at most 100."
+                        ) from None
+                if "montage_slices" in report_config:
+                    try:
+                        if int(report_config["montage_slices"]) < 3:
+                            raise ValueError
+                    except (TypeError, ValueError):
+                        raise ValueError(
+                            "qc_report.reports.mask_qc.montage_slices must be an integer of at least 3."
+                        ) from None
             if "input_dataset" in report_config:
                 _validate_input_dataset(
                     report_config["input_dataset"],

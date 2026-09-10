@@ -196,3 +196,7 @@ qc_report:
       parcel_thresholds:
         warning: 0.20
         severe: 0.30
+    mask_qc:
+      enabled: false
+      rare_voxel_threshold_pct: 10
+      montage_slices: 12
