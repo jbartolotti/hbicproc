@@ -6,6 +6,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
@@ -186,6 +187,19 @@ def _histogram(volume_frame: pd.DataFrame, output_path: Path) -> None:
     plt.close(figure)
 
 
+@lru_cache(maxsize=1)
+def _mni152_template() -> nib.Nifti1Image | None:
+    """Return Nilearn's MNI152 template, or None when it is unavailable locally."""
+
+    try:
+        from nilearn.datasets import load_mni152_template
+
+        return load_mni152_template()
+    except Exception as exc:
+        logger.warning("MNI152 template unavailable for mask montages; using mask-only images: %s", exc)
+        return None
+
+
 def _montage(record: MaskRecord, mask: np.ndarray, reference: nib.Nifti1Image, output_path: Path, slices: int) -> None:
     import matplotlib
 
@@ -195,7 +209,16 @@ def _montage(record: MaskRecord, mask: np.ndarray, reference: nib.Nifti1Image, o
     image = nib.Nifti1Image(mask.astype(np.float32), reference.affine, reference.header)
     coordinates = np.linspace(0.12, 0.88, slices)
     figure = plt.figure(figsize=(slices * 1.2, 1.7))
-    display = plot_stat_map(image, bg_img="MNI152", display_mode="z", cut_coords=coordinates, threshold=0.5, colorbar=False, figure=figure)
+    background = _mni152_template()
+    display = plot_stat_map(
+        image,
+        bg_img=background if background is not None else False,
+        display_mode="z",
+        cut_coords=coordinates,
+        threshold=0.5,
+        colorbar=False,
+        figure=figure,
+    )
     display.title(f"{record.subject} run-{record.run or 'n/a'}", size=8)
     figure.tight_layout(pad=0.2)
     figure.savefig(output_path, dpi=100, bbox_inches="tight")
