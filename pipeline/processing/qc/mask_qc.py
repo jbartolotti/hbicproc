@@ -200,6 +200,24 @@ def _mni152_template() -> nib.Nifti1Image | None:
         return None
 
 
+def _z_slice_coordinates(image: nib.Nifti1Image, slices: int) -> np.ndarray:
+    """Return evenly spaced world-space z coordinates spanning the image."""
+
+    shape = image.shape[:3]
+    corners = np.array(
+        [
+            [x, y, z]
+            for x in (0, shape[0] - 1)
+            for y in (0, shape[1] - 1)
+            for z in (0, shape[2] - 1)
+        ],
+        dtype=float,
+    )
+    world_corners = nib.affines.apply_affine(image.affine, corners)
+    z_min, z_max = world_corners[:, 2].min(), world_corners[:, 2].max()
+    return np.linspace(z_min, z_max, slices)
+
+
 def _montage(record: MaskRecord, mask: np.ndarray, reference: nib.Nifti1Image, output_path: Path, slices: int) -> None:
     import matplotlib
 
@@ -207,7 +225,7 @@ def _montage(record: MaskRecord, mask: np.ndarray, reference: nib.Nifti1Image, o
     import matplotlib.pyplot as plt
 
     image = nib.Nifti1Image(mask.astype(np.float32), reference.affine, reference.header)
-    coordinates = np.linspace(0.12, 0.88, slices)
+    coordinates = _z_slice_coordinates(image, slices)
     figure = plt.figure(figsize=(slices * 1.2, 1.7))
     background = _mni152_template()
     display = plot_stat_map(
@@ -297,15 +315,15 @@ def _write_combo_report(
         image = f"<img class='montage' src='{html.escape(montage)}' alt='Mask montage for {html.escape(str(row['subject']))}'>" if montage else "<p>Montage unavailable.</p>"
         cards.append(
             "<article class='subject-card'>"
-            f"<h3>{html.escape(str(row['subject']))} <small>run-{html.escape(str(row['run']))}</small></h3>"
-            f"<p>Mask volume: {row['mask_volume_ml']:.3f} mL | Rare voxel score: {int(row['rare_voxel_score'])}</p>{image}</article>"
+            f"<div class='subject-meta'><strong>{html.escape(str(row['subject']))}</strong> | Session: {html.escape(str(row['session']))} | Task: {html.escape(str(row['task']))} | Run: {html.escape(str(row['run']))} | Mask volume: {row['mask_volume_ml']:.3f} mL | Rare voxel score: {int(row['rare_voxel_score'])}</div>"
+            f"{image}</article>"
         )
     summary_items = "".join(f"<li><strong>{html.escape(key)}:</strong> {value}</li>" for key, value in summary.items())
     viewer = f"<iframe class='viewer' src='{html.escape(viewer_path.name)}' title='Interactive mask coverage viewer'></iframe>" if viewer_path.exists() else "<p>Interactive viewer unavailable.</p>"
     report_html = (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<title>Mask QC: ses-{html.escape(session)} task-{html.escape(task)}</title>"
-        "<style>body{font-family:Arial,sans-serif;margin:2rem;color:#222}.data-table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.85rem}.data-table th,.data-table td{border:1px solid #ccc;padding:.35rem;text-align:left}.data-table th{background:#eee}.viewer{width:100%;height:650px;border:1px solid #bbb}.histogram{max-width:800px;width:100%}.subject-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem}.subject-card{border:1px solid #ccc;padding:.75rem}.montage{max-width:100%;height:auto}small{font-weight:normal;color:#666}</style></head><body>"
+        "<style>body{font-family:Arial,sans-serif;margin:2rem;color:#222}.data-table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.85rem}.data-table th,.data-table td{border:1px solid #ccc;padding:.35rem;text-align:left}.data-table th{background:#eee}.viewer{width:100%;height:650px;border:1px solid #bbb}.histogram{max-width:800px;width:100%}.subject-grid{display:flex;flex-direction:column;gap:.65rem}.subject-card{border:1px solid #ccc;padding:.5rem}.subject-meta{font-size:.9rem;line-height:1.3;white-space:nowrap;overflow-x:auto;margin-bottom:.4rem}.montage{display:block;width:100%;max-width:none;height:auto}</style></head><body>"
         f"<h1>Mask QC</h1><h2>Session: {html.escape(session)} | Task: {html.escape(task)}</h2>"
         "<h2>Overview</h2><ul>" + summary_items + "</ul>"
         + "<h2>Coverage Map Viewer</h2>" + viewer

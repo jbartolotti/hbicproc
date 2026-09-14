@@ -229,3 +229,11 @@ def test_mask_qc_groups_masks_and_writes_coverage_report(tmp_path: Path, monkeyp
     assert "Subject Review Cards" in ranking
     assert (combo_root / "ses-BL_task-nback_coverage_viewer.html").exists()
     assert len(list((combo_root / "montages").glob("*.png"))) == 3
+
+
+def test_mask_montage_coordinates_span_world_z_extent() -> None:
+    image = nib.Nifti1Image(np.zeros((3, 4, 4), dtype=np.uint8), np.diag([2, 2, 2, 1]))
+
+    coordinates = mask_qc._z_slice_coordinates(image, 4)
+
+    np.testing.assert_allclose(coordinates, np.array([0.0, 2.0, 4.0, 6.0]))
