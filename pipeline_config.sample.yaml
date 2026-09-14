@@ -86,6 +86,14 @@ analysis:
   input_dataset:
     name: fmriprep
     path: derivatives/fmriprep
+  first_level:
+    # derivative uses a BIDS-associated mask when available; nilearn preserves
+    # the historical automatic EPI mask behavior.
+    mask_strategy: derivative
+    nilearn_fallback_mask: true
+    # Required only when mask_strategy is explicit. Supports {subject},
+    # {session}, {task}, and {run} placeholders.
+    mask_path_template: ""
   # These may be set globally and are inherited by task analyses.
   # atlases: [schaefer200, schaefer400, harvard_oxford_cortical, harvard_oxford_subcortical, aal]
   subject:

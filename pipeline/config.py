@@ -101,6 +101,11 @@ def _apply_defaults(config):
                 "name": "fmriprep",
                 "path": "derivatives/fmriprep"
             },
+            "first_level": {
+                "mask_strategy": "derivative",
+                "nilearn_fallback_mask": True,
+                "mask_path_template": ""
+            },
             "atlases": [],
             "subject": {
                 "tasks": {}
@@ -183,6 +188,8 @@ def validate_config(config):
 
     input_dataset = analysis.get("input_dataset")
     _validate_input_dataset(input_dataset, field_name="analysis.input_dataset")
+    first_level = analysis.get("first_level", {})
+    _validate_first_level_configuration(first_level, field_name="analysis.first_level")
     _validate_atlases(analysis.get("atlases", []), field_name="analysis.atlases")
 
     qc_report = config.get("qc_report", {})
@@ -306,6 +313,12 @@ def validate_config(config):
                 raise ValueError(
                     f"analysis.subject.tasks.{task_name}.models.{model_name}.type must not be empty."
                 )
+            if "mask_strategy" in model_config or "nilearn_fallback_mask" in model_config:
+                _validate_first_level_configuration(
+                    model_config,
+                    field_name=f"analysis.subject.tasks.{task_name}.models.{model_name}",
+                    require_template=False,
+                )
 
         analyses = task_config.get("analyses", {})
         if not isinstance(analyses, dict):
@@ -370,6 +383,22 @@ def _validate_input_dataset(value, *, field_name):
         raise ValueError(f"{field_name}.name must not be empty.")
     if not str(value.get("path", "")).strip():
         raise ValueError(f"{field_name}.path must not be empty.")
+
+
+def _validate_first_level_configuration(value, *, field_name, require_template=True):
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be an object.")
+    strategy = str(value.get("mask_strategy", "derivative")).strip().lower()
+    if strategy not in {"derivative", "nilearn", "explicit"}:
+        raise ValueError(
+            f"{field_name}.mask_strategy must be one of: derivative, nilearn, explicit."
+        )
+    if "nilearn_fallback_mask" in value and not isinstance(value["nilearn_fallback_mask"], bool):
+        raise ValueError(f"{field_name}.nilearn_fallback_mask must be a boolean.")
+    if strategy == "explicit" and require_template:
+        template = str(value.get("mask_path_template", "")).strip()
+        if not template:
+            raise ValueError(f"{field_name}.mask_path_template must not be empty for explicit masking.")
 
 
 def _deep_merge(base, override):
@@ -438,7 +467,12 @@ def _resolve_nested_paths(section_data, root_dir, study_root):
     for key, value in section_data.items():
         if isinstance(value, dict):
             _resolve_nested_paths(value, root_dir, study_root)
-        elif isinstance(value, str) and (key.endswith("_dir") or key.endswith("_path") or key.endswith("_file")):
+        elif isinstance(value, str) and (
+            key.endswith("_dir")
+            or key.endswith("_path")
+            or key.endswith("_file")
+            or key.endswith("_path_template")
+        ):
             section_data[key] = str(_resolve_path(value, root_dir, study_root))
 
 

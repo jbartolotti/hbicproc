@@ -30,6 +30,7 @@ class TaskRunContext:
     session: str | None = None
     run: str | None = None
     bold_path: Path | None = None
+    derivative_mask_path: Path | None = None
     events_path: Path | None = None
     confounds_path: Path | None = None
     input_dataset: InputDataset | None = None
@@ -41,6 +42,7 @@ class TaskRunContext:
             "session": self.session,
             "run": self.run,
             "bold_path": str(self.bold_path) if self.bold_path is not None else None,
+            "derivative_mask_path": str(self.derivative_mask_path) if self.derivative_mask_path is not None else None,
             "events_path": str(self.events_path) if self.events_path is not None else None,
             "confounds_path": str(self.confounds_path) if self.confounds_path is not None else None,
             "input_dataset": self.input_dataset.as_dict() if self.input_dataset else None,

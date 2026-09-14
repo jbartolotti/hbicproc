@@ -22,6 +22,9 @@ _ENTITY_ALIASES = {
     "run": ("run",),
     "desc": ("desc",),
     "stat": ("stat",),
+    "space": ("space",),
+    "res": ("res",),
+    "den": ("den",),
 }
 
 
@@ -202,6 +205,16 @@ class DatasetIndex:
             run=normalized_run,
         )
 
+        mask_records = self._query(
+            derivative_layout,
+            suffix="mask",
+            extension=[".nii.gz", ".nii"],
+            subject=normalized_subject,
+            task=normalized_task,
+            session=normalized_session,
+            run=normalized_run,
+        )
+
         events_records = self._query(
             self.layout,
             suffix="events",
@@ -282,6 +295,7 @@ class DatasetIndex:
                 },
                 label="CONFOUNDS",
             )
+            mask_match = self._matching_derivative_mask(mask_records, bold_info)
             if event_match is None or confounds_match is None:
                 logger.info(
                     "Rejecting candidate: BOLD subject=%s session=%s task=%s run=%s; EVENTS=%s CONFOUNDS=%s",
@@ -305,6 +319,7 @@ class DatasetIndex:
                 session=session_value,
                 run=run_value,
                 bold_path=Path(str(bold_record.path)),
+                derivative_mask_path=Path(str(mask_match.path)) if mask_match is not None else None,
                 events_path=Path(str(event_match.path)),
                 confounds_path=Path(str(confounds_match.path)),
                 input_dataset=selected_dataset,
@@ -315,6 +330,48 @@ class DatasetIndex:
         resolved_runs = tuple(sorted(runs, key=lambda item: (item.session or "", item.run or "")))
         self._task_runs_cache[cache_key] = resolved_runs
         return list(resolved_runs)
+
+    def _matching_derivative_mask(self, records: list[Any], bold_entities: dict[str, Any]) -> Any | None:
+        expected = {
+            key: self._entity_value(bold_entities, key)
+            for key in ("subject", "session", "task", "run", "space", "res", "den")
+        }
+        candidates = []
+        for record in records:
+            entities = self._record_entities(record)
+            if not self._matches_expected(entities, {key: value for key, value in expected.items() if value is not None}):
+                continue
+            candidates.append(record)
+        if not candidates:
+            logger.info(
+                "No derivative mask matched BOLD entities: subject=%s session=%s task=%s run=%s path=%s",
+                self._entity_value(bold_entities, "subject"),
+                self._entity_value(bold_entities, "session"),
+                self._entity_value(bold_entities, "task"),
+                self._entity_value(bold_entities, "run"),
+                bold_entities.get("path"),
+            )
+            return None
+        if len(candidates) > 1:
+            ranked = sorted(candidates, key=lambda record: self._mask_candidate_rank(record, bold_entities), reverse=True)
+            best_rank = self._mask_candidate_rank(ranked[0], bold_entities)
+            if sum(self._mask_candidate_rank(record, bold_entities) == best_rank for record in ranked) > 1:
+                logger.warning(
+                    "Multiple equally matching derivative masks found; no mask selected: %s",
+                    [str(getattr(record, "path", record)) for record in ranked],
+                )
+                return None
+            candidates = ranked
+        logger.info("Matched derivative mask: %s", candidates[0].path)
+        return candidates[0]
+
+    def _mask_candidate_rank(self, record: Any, bold_entities: dict[str, Any]) -> int:
+        entities = self._record_entities(record)
+        return sum(
+            self._entity_value(entities, key) == self._entity_value(bold_entities, key)
+            for key in ("space", "res", "den")
+            if self._entity_value(bold_entities, key) is not None
+        )
 
     def get_confounds_files(
         self,
@@ -508,6 +565,9 @@ class DatasetIndex:
                 "run": "run",
                 "desc": "desc",
                 "stat": "stat",
+                "space": "space",
+                "res": "res",
+                "den": "den",
             }.get(key, key)
             entities[normalized_key] = _normalize_entity_text(value, prefix=key)
         return {key: value for key, value in entities.items() if value is not None}

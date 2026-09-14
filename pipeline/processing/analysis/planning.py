@@ -93,6 +93,8 @@ def build_task_plans(config: Mapping[str, Any], subject: str) -> tuple[TaskPlan,
     if not output_root:
         raise ValueError("analysis.output_dir must not be empty.")
 
+    first_level_defaults = dict(_mapping(analysis_config.get("first_level"), field_name="analysis.first_level"))
+
     plans: list[TaskPlan] = []
     for task_name, raw_task_config in task_configs.items():
         task = str(task_name).strip()
@@ -128,8 +130,10 @@ def build_task_plans(config: Mapping[str, Any], subject: str) -> tuple[TaskPlan,
                 raise ValueError(
                     f"Model '{model}' for task '{task}' must define a non-empty 'type'."
                 )
+            effective_model_config = dict(first_level_defaults)
+            effective_model_config.update(model_config)
             models.append(
-                ModelSpec(name=model, model_type=model_type, configuration=dict(model_config))
+                ModelSpec(name=model, model_type=model_type, configuration=effective_model_config)
             )
 
         model_names = {model.name for model in models}

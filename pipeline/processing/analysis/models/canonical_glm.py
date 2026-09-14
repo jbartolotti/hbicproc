@@ -7,12 +7,14 @@ from typing import Any, Mapping
 
 import nibabel as nib
 from nibabel.dft import logger
+import numpy as np
 import pandas as pd
 from nilearn.glm.first_level import FirstLevelModel
 from nilearn.plotting import plot_design_matrix
 
 from ..context import TaskRunContext
 from ..derivatives import DerivativePathBuilder
+from pipeline.processing.analysis.masking import MaskResolution, resolve_mask
 from .base import ModelPlan, ModelSpec
 
 
@@ -24,6 +26,7 @@ class FittedModel:
     estimator: FirstLevelModel
     events: pd.DataFrame
     confounds: pd.DataFrame | None
+    mask_resolution: MaskResolution | None = None
 
 
 class CanonicalGLMModel:
@@ -57,6 +60,7 @@ class CanonicalGLMModel:
 
         confounds = self._load_confounds(context)
         configuration = dict(self.spec.configuration)
+        mask_resolution = resolve_mask(context, configuration, logger=logger)
         estimator = FirstLevelModel(
             t_r=self._repetition_time(context.bold_path, configuration),
             hrf_model=configuration.get("hrf_model", "glover"),
@@ -68,6 +72,7 @@ class CanonicalGLMModel:
             minimize_memory=False,
             reports=True,
             n_jobs=configuration.get("n_jobs", 1),
+            mask_img=mask_resolution.mask_img,
         )
 
 
@@ -86,7 +91,13 @@ class CanonicalGLMModel:
             events=events,
             confounds=confounds,
         )
-        return FittedModel(plan=plan, estimator=estimator, events=events, confounds=confounds)
+        return FittedModel(
+            plan=plan,
+            estimator=estimator,
+            events=events,
+            confounds=confounds,
+            mask_resolution=mask_resolution,
+        )
 
     def write_metadata(self, fitted: FittedModel) -> Path:
         output_dir = fitted.plan.derivatives.model_directory
@@ -100,7 +111,18 @@ class CanonicalGLMModel:
             "context": fitted.plan.context.as_dict(),
             "fingerprint_configuration": self.spec.fingerprint_configuration,
             "design_columns": list(fitted.estimator.design_matrices_[0].columns),
+            "mask": fitted.mask_resolution.as_dict() if fitted.mask_resolution is not None else None,
         }
+        if fitted.mask_resolution is not None:
+            effective_mask = getattr(fitted.estimator, "mask_img_", None)
+            if effective_mask is not None:
+                effective_data = np.asarray(effective_mask.get_fdata())
+                metadata["effective_mask"] = {
+                    "shape": list(effective_mask.shape),
+                    "affine": effective_mask.affine.tolist(),
+                    "voxel_count": int(np.count_nonzero(effective_data > 0)),
+                    "voxel_volume_mm3": float(abs(np.linalg.det(effective_mask.affine[:3, :3]))),
+                }
         metadata_path.write_text(json.dumps(metadata, indent=2, default=str) + "\n", encoding="utf-8")
         return metadata_path
 
@@ -142,6 +164,17 @@ class CanonicalGLMModel:
         derivatives["design_matrix_png"] = [str(design_png)]
 
         mask_img = getattr(fitted.estimator, "mask_img_", None)
+        if fitted.mask_resolution is not None and fitted.mask_resolution.mask_img is not None:
+            input_mask_path = self._model_file(
+                fitted,
+                subject=context.subject,
+                session=context.session,
+                task=context.task,
+                run=context.run,
+                desc="input-mask",
+            )
+            fitted.mask_resolution.mask_img.to_filename(input_mask_path)
+            derivatives["input_mask"] = [str(input_mask_path)]
         if mask_img is not None:
             mask_path = self._model_file(
                 fitted,

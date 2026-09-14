@@ -50,6 +50,30 @@ Tasks and analyses default to enabled. Set `enabled` to `false` to disable one.
 Required confounds must be present in the selected derivative confounds file.
 Missing required columns produce a run-specific validation error.
 
+First-level mask selection is configured globally and inherited by each model. A model may
+override these values locally when different models need different masking behavior:
+
+```yaml
+analysis:
+  first_level:
+    mask_strategy: derivative
+    nilearn_fallback_mask: true
+    mask_path_template: ""
+```
+
+`mask_strategy` accepts `derivative`, `nilearn`, or `explicit`. `derivative` matches a
+mask derivative to the selected BOLD run using BIDS entities and falls back to Nilearn when
+no usable mask is available. Set `nilearn_fallback_mask: false` to make a missing or invalid
+derivative mask an error for that subject. `nilearn` preserves the historical automatic
+Nilearn mask behavior. `explicit` requires `mask_path_template`, which supports `{subject}`,
+`{session}`, `{task}`, and `{run}` placeholders and fails when the resolved mask is missing.
+
+Masks are checked for finite binary values and non-empty content. Masks on a different spatial
+grid are resampled to the BOLD grid with nearest-neighbor interpolation. Model metadata records
+the requested strategy, source, mask path, fallback state, and effective mask geometry. When a
+supplied mask is used, it is also written as `desc-input-mask.nii.gz`; `desc-mask.nii.gz`
+continues to contain the effective fitted mask.
+
 ## Inputs
 
 Raw BIDS data supplies events. The configured preprocessed input dataset supplies

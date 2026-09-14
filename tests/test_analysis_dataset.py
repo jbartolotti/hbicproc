@@ -117,9 +117,11 @@ def test_dataset_index_resolves_runs_from_configured_input_dataset(tmp_path: Pat
     bold_path = derivative_func_dir / "sub-001_ses-baseline_task-rest_run-1_desc-preproc_bold.nii.gz"
     events_path = raw_func_dir / "sub-001_ses-baseline_task-rest_run-1_events.tsv"
     confounds_path = derivative_func_dir / "sub-001_ses-baseline_task-rest_run-1_desc-confounds_timeseries.tsv"
+    mask_path = derivative_func_dir / "sub-001_ses-baseline_task-rest_run-1_desc-brain_mask.nii.gz"
     bold_path.write_bytes(b"fake-nifti")
     events_path.write_text("onset\tduration\ttrial_type\n0\t1\tcontrol\n", encoding="utf-8")
     confounds_path.write_text("trans_x\trot_y\n0.1\t0.2\n", encoding="utf-8")
+    mask_path.write_bytes(b"fake-mask")
 
     dataset = DatasetIndex.from_config(
         {
@@ -142,6 +144,7 @@ def test_dataset_index_resolves_runs_from_configured_input_dataset(tmp_path: Pat
         task="rest",
         run="1",
         bold_path=bold_path,
+        derivative_mask_path=mask_path,
         events_path=events_path,
         confounds_path=confounds_path,
         input_dataset=InputDataset("fmriprep", derivative_root),
