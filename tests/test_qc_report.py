@@ -137,7 +137,10 @@ def test_motion_qc_loads_configured_design_matrix_shading(tmp_path: Path) -> Non
     )
 
     assert warnings == []
-    assert run.condition_regions == {"oneback": [(1, 2)], "twoback": [(3, 4)]}
+    assert run.condition_values == {
+        "oneback": [0.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+        "twoback": [0.0, 0.0, 0.0, 1.0, 1.0, 0.0],
+    }
 
 
 def test_contrast_motion_qc_discovers_contrasts_and_generates_maps(tmp_path: Path, monkeypatch) -> None:

@@ -31,7 +31,7 @@ class RunMotion:
     run: str | None
     source_path: Path
     fd: list[float]
-    condition_regions: dict[str, list[tuple[int, int]]] = field(default_factory=dict)
+    condition_values: dict[str, list[float]] = field(default_factory=dict)
 
     @property
     def mean_fd(self) -> float:
@@ -157,19 +157,9 @@ def _matching_design_matrix(analysis_root: Path, run: RunMotion) -> Path | None:
     return sorted(candidates, key=str)[0] if candidates else None
 
 
-def _nonzero_regions(values: pd.Series, volume_count: int) -> list[tuple[int, int]]:
-    active = pd.to_numeric(values, errors="coerce").fillna(0).to_numpy()[:volume_count] != 0
-    regions = []
-    start = None
-    for index, is_active in enumerate(active):
-        if is_active and start is None:
-            start = index
-        elif not is_active and start is not None:
-            regions.append((start, index - 1))
-            start = None
-    if start is not None:
-        regions.append((start, len(active) - 1))
-    return regions
+def _condition_values(values: pd.Series, volume_count: int) -> list[float]:
+    numeric = pd.to_numeric(values, errors="coerce").fillna(0.0).to_numpy(dtype=float)
+    return numeric[:volume_count].tolist()
 
 
 def _load_condition_regions(
@@ -200,9 +190,7 @@ def _load_condition_regions(
             if column not in design.columns:
                 warnings.append(f"Design matrix {design_path} is missing requested column '{column}'.")
                 continue
-            regions = _nonzero_regions(design[column], len(run.fd))
-            if regions:
-                run.condition_regions[column] = regions
+            run.condition_values[column] = _condition_values(design[column], len(run.fd))
 
 
 def load_motion_summary(context, report_config: dict[str, Any]) -> tuple[pd.DataFrame, list[str], list[str]]:
@@ -288,21 +276,30 @@ def _save_run_figures(runs: list[RunMotion], figure_dir: Path, thresholds: dict[
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.transforms import blended_transform_factory
 
     trace_dir = figure_dir / "fd_traces"
     trace_dir.mkdir(parents=True, exist_ok=True)
     outputs = []
     for run in runs:
         figure, axis = plt.subplots(figsize=(8, 3.5))
-        for color_index, (condition, regions) in enumerate(run.condition_regions.items()):
+        overlay_transform = blended_transform_factory(axis.transData, axis.transAxes)
+        for color_index, (condition, values) in enumerate(run.condition_values.items()):
             color = _CONDITION_COLORS[color_index % len(_CONDITION_COLORS)]
-            for region_index, (start, end) in enumerate(regions):
-                axis.axvspan(
-                    start - 0.5,
-                    end + 0.5,
+            condition_array = pd.to_numeric(pd.Series(values), errors="coerce").fillna(0.0).to_numpy()
+            maximum = float(condition_array.max()) if condition_array.size else 0.0
+            if maximum > 0:
+                normalized = (condition_array / maximum).clip(0.0, 1.0)
+                axis.fill_between(
+                    range(len(normalized)),
+                    0.0,
+                    normalized,
                     color=color,
                     alpha=0.18,
-                    label=condition if region_index == 0 else None,
+                    label=condition,
+                    linewidth=0,
+                    step="mid",
+                    transform=overlay_transform,
                     zorder=0,
                 )
         axis.plot(range(len(run.fd)), run.fd, linewidth=0.8)
@@ -311,6 +308,7 @@ def _save_run_figures(runs: list[RunMotion], figure_dir: Path, thresholds: dict[
         axis.set_xlabel("Volume index")
         axis.set_ylabel("Framewise displacement (mm)")
         axis.set_title(f"{run.subject} | session={_label(run.session)} | task={_label(run.task)} | run={_label(run.run)}")
+        axis.set_ylim(bottom=0)
         axis.legend(loc="upper right")
         figure.tight_layout()
         filename = _run_filename(run, "fdtrace")
