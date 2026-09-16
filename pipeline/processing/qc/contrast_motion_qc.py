@@ -292,7 +292,7 @@ class ContrastMotionQCReport(QCReport):
             overview_lines.append(f"<h4>{html.escape(row['atlas'])} / {html.escape(row['contrast'])} / {html.escape(row['motion_metric'])}</h4><p>{html.escape(_interpret(row))}</p>")
         viewer_html = "".join(
             f"<h4>{html.escape(row['atlas'])} / {html.escape(row['contrast'])} / {html.escape(row['motion_metric'])}</h4>"
-            + (f"<iframe class='viewer' src='../{html.escape(Path(row['viewer']).relative_to(output_dir).as_posix())}'></iframe>" if row["viewer"] else "<p>Viewer unavailable.</p>")
+            + (f"<iframe class='viewer' src='{html.escape(Path(row['viewer']).relative_to(output_dir).as_posix())}'></iframe>" if row["viewer"] else "<p>Viewer unavailable.</p>")
             for row in viewer_rows
         )
         detail_html = "".join(

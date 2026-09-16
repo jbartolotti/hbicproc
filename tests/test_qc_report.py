@@ -8,6 +8,7 @@ import pytest
 from pipeline.cli import _build_parser
 from pipeline.processing.qc import service
 from pipeline.processing.qc import mask_qc
+from pipeline.processing.qc import motion_qc
 
 
 def test_qc_report_is_registered_as_global_cli_stage() -> None:
@@ -106,6 +107,37 @@ def test_motion_qc_skips_when_confounds_are_unavailable(tmp_path: Path, monkeypa
 
     assert result["success"] is True
     assert result["details"]["reports"][0]["status"] == "skipped"
+
+
+def test_motion_qc_loads_configured_design_matrix_shading(tmp_path: Path) -> None:
+    analysis_root = tmp_path / "derivatives" / "hbicproc"
+    design_path = (
+        analysis_root
+        / "sub-001"
+        / "ses-baseline"
+        / "func"
+        / "task-rest"
+        / "run-1"
+        / "models"
+        / "canonical_glm"
+        / "sub-001_ses-baseline_task-rest_run-1_desc-design-matrix.tsv"
+    )
+    design_path.parent.mkdir(parents=True)
+    design_path.write_text(
+        "oneback\ttwoback\n0\t0\n1\t0\n1\t0\n0\t1\n0\t1\n0\t0\n",
+        encoding="utf-8",
+    )
+    run = motion_qc.RunMotion(
+        "001", "baseline", "rest", "1", tmp_path / "confounds.tsv", [0.1] * 6
+    )
+    warnings: list[str] = []
+
+    motion_qc._load_condition_regions(
+        [run], analysis_root, ["oneback", "twoback"], warnings
+    )
+
+    assert warnings == []
+    assert run.condition_regions == {"oneback": [(1, 2)], "twoback": [(3, 4)]}
 
 
 def test_contrast_motion_qc_discovers_contrasts_and_generates_maps(tmp_path: Path, monkeypatch) -> None:

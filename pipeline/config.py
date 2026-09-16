@@ -126,7 +126,8 @@ def _apply_defaults(config):
             "output_dir": "derivatives/hbicproc/qc_report",
             "reports": {
                 "motion_qc": {
-                    "enabled": True
+                    "enabled": True,
+                    "design_matrix_columns": []
                 },
                 "mask_qc": {
                     "enabled": False,
@@ -250,6 +251,16 @@ def validate_config(config):
                         raise ValueError(
                             "qc_report.reports.contrast_motion_qc.parcel_thresholds.warning must not exceed severe."
                         )
+            if report_name == "motion_qc":
+                design_matrix_columns = report_config.get("design_matrix_columns", [])
+                if isinstance(design_matrix_columns, str):
+                    design_matrix_columns = [design_matrix_columns]
+                if not isinstance(design_matrix_columns, list) or not all(
+                    isinstance(column, str) and column.strip() for column in design_matrix_columns
+                ):
+                    raise ValueError(
+                        "qc_report.reports.motion_qc.design_matrix_columns must be a list of names."
+                    )
             if report_name == "mask_qc":
                 if "rare_voxel_threshold_pct" in report_config:
                     try:

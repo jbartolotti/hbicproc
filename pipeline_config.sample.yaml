@@ -193,6 +193,9 @@ qc_report:
       fd_thresholds:
         warning: 0.2
         severe: 0.5
+      # Optional columns from each subject's saved first-level design matrix.
+      # Nonzero spans are shown as translucent condition shading on FD traces.
+      design_matrix_columns: []
       # Optional; defaults to analysis.input_dataset.
       # input_dataset:
       #   name: fmriprep

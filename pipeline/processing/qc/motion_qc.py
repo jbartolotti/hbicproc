@@ -4,7 +4,7 @@ import html
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -20,6 +20,7 @@ from .registry import register_report
 logger = logging.getLogger(__name__)
 _ENTITY_PATTERN = re.compile(r"(?:^|_)((?:sub|ses|task|run)-[^_]+)")
 _DEFAULT_THRESHOLDS = {"warning": 0.2, "severe": 0.5}
+_CONDITION_COLORS = ("tab:blue", "tab:green", "tab:purple", "tab:brown", "tab:pink", "tab:olive", "tab:cyan", "tab:gray")
 
 
 @dataclass
@@ -30,6 +31,7 @@ class RunMotion:
     run: str | None
     source_path: Path
     fd: list[float]
+    condition_regions: dict[str, list[tuple[int, int]]] = field(default_factory=dict)
 
     @property
     def mean_fd(self) -> float:
@@ -137,6 +139,72 @@ def _run_table(runs: list[RunMotion], thresholds: dict[str, float]) -> pd.DataFr
     return pd.DataFrame([run.as_dict(thresholds) for run in runs])
 
 
+def _configured_columns(report_config: dict[str, Any]) -> list[str]:
+    value = report_config.get("design_matrix_columns", [])
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    return list(dict.fromkeys(str(column).strip() for column in value if str(column).strip()))
+
+
+def _matching_design_matrix(analysis_root: Path, run: RunMotion) -> Path | None:
+    candidates = []
+    for path in analysis_root.rglob("*_desc-design-matrix.tsv"):
+        entities = _entities_from_path(path)
+        if all(entities[key] == getattr(run, key) for key in ("subject", "session", "task", "run")):
+            candidates.append(path)
+    return sorted(candidates, key=str)[0] if candidates else None
+
+
+def _nonzero_regions(values: pd.Series, volume_count: int) -> list[tuple[int, int]]:
+    active = pd.to_numeric(values, errors="coerce").fillna(0).to_numpy()[:volume_count] != 0
+    regions = []
+    start = None
+    for index, is_active in enumerate(active):
+        if is_active and start is None:
+            start = index
+        elif not is_active and start is not None:
+            regions.append((start, index - 1))
+            start = None
+    if start is not None:
+        regions.append((start, len(active) - 1))
+    return regions
+
+
+def _load_condition_regions(
+    runs: list[RunMotion],
+    analysis_root: Path,
+    columns: list[str],
+    warnings: list[str],
+) -> None:
+    if not columns:
+        return
+    for run in runs:
+        design_path = _matching_design_matrix(analysis_root, run)
+        if design_path is None:
+            warnings.append(
+                f"No design matrix found for sub-{run.subject} task-{_label(run.task)} run-{_label(run.run)}."
+            )
+            continue
+        try:
+            design = pd.read_csv(design_path, sep="\t")
+        except Exception as exc:
+            warnings.append(f"Could not read design matrix {design_path}: {exc}")
+            continue
+        if len(design) != len(run.fd):
+            warnings.append(
+                f"Design matrix {design_path} has {len(design)} rows but FD has {len(run.fd)} volumes; shading was truncated."
+            )
+        for column in columns:
+            if column not in design.columns:
+                warnings.append(f"Design matrix {design_path} is missing requested column '{column}'.")
+                continue
+            regions = _nonzero_regions(design[column], len(run.fd))
+            if regions:
+                run.condition_regions[column] = regions
+
+
 def load_motion_summary(context, report_config: dict[str, Any]) -> tuple[pd.DataFrame, list[str], list[str]]:
     """Load the canonical run-level motion metrics used by motion_qc."""
 
@@ -226,6 +294,17 @@ def _save_run_figures(runs: list[RunMotion], figure_dir: Path, thresholds: dict[
     outputs = []
     for run in runs:
         figure, axis = plt.subplots(figsize=(8, 3.5))
+        for color_index, (condition, regions) in enumerate(run.condition_regions.items()):
+            color = _CONDITION_COLORS[color_index % len(_CONDITION_COLORS)]
+            for region_index, (start, end) in enumerate(regions):
+                axis.axvspan(
+                    start - 0.5,
+                    end + 0.5,
+                    color=color,
+                    alpha=0.18,
+                    label=condition if region_index == 0 else None,
+                    zorder=0,
+                )
         axis.plot(range(len(run.fd)), run.fd, linewidth=0.8)
         axis.axhline(thresholds["warning"], color="darkorange", linestyle="--", label=f"> {thresholds['warning']:.2f} mm")
         axis.axhline(thresholds["severe"], color="red", linestyle="--", label=f"> {thresholds['severe']:.2f} mm")
@@ -297,6 +376,7 @@ class MotionQCReport(QCReport):
         figure_dir.mkdir(parents=True, exist_ok=True)
         report_config = context.report_config
         thresholds = _thresholds(report_config)
+        design_matrix_columns = _configured_columns(report_config)
         logger.info("Initializing motion_qc report (thresholds=%s output=%s)", thresholds, output_dir)
 
         input_dataset_config = report_config.get("input_dataset") or context.config["analysis"]["input_dataset"]
@@ -339,6 +419,11 @@ class MotionQCReport(QCReport):
                 output_dir,
                 {"warnings": warnings},
             )
+
+        if design_matrix_columns:
+            logger.info("Loading design-matrix shading columns: %s", design_matrix_columns)
+            analysis_root = Path(context.config["analysis"]["output_dir"])
+            _load_condition_regions(runs, analysis_root, design_matrix_columns, warnings)
 
         frame = _run_table(runs, thresholds).sort_values("mean_fd", ascending=False)
         all_fd = [value for run in runs for value in run.fd]
