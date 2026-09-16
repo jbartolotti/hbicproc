@@ -132,6 +132,11 @@ def build_task_plans(config: Mapping[str, Any], subject: str) -> tuple[TaskPlan,
                 )
             effective_model_config = dict(first_level_defaults)
             effective_model_config.update(model_config)
+            if isinstance(first_level_defaults.get("confounds"), Mapping) and isinstance(model_config.get("confounds"), Mapping):
+                effective_model_config["confounds"] = {
+                    **first_level_defaults["confounds"],
+                    **model_config["confounds"],
+                }
             models.append(
                 ModelSpec(name=model, model_type=model_type, configuration=effective_model_config)
             )

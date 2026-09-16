@@ -50,6 +50,25 @@ Tasks and analyses default to enabled. Set `enabled` to `false` to disable one.
 Required confounds must be present in the selected derivative confounds file.
 Missing required columns produce a run-specific validation error.
 
+Confound groups may also generate motion-spike regressors and include global signal:
+
+```yaml
+confounds:
+  motion: true
+  acompcor: 5
+  spike_threshold: 0.5
+  spike_following_volumes: 1
+  gsr: true
+```
+
+`spike_threshold` is an FD threshold in millimeters. Values greater than the threshold
+generate one-hot regressors named `spike_0000`, `spike_0001`, and so on. Each flagged
+volume can include the configured number of following volumes; overlapping windows are
+deduplicated. `null`, `NA`, or `0` disables spike regression. Volumes remain in the BOLD
+series and event timing is unchanged. `gsr: true` includes fMRIPrep's `global_signal`
+column. The model's motion-QC summary records the threshold, spike columns, flagged-volume
+percentage, and GSR state.
+
 First-level mask selection is configured globally and inherited by each model. A model may
 override these values locally when different models need different masking behavior:
 

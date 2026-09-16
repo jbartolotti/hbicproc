@@ -94,6 +94,11 @@ analysis:
     # Required only when mask_strategy is explicit. Supports {subject},
     # {session}, {task}, and {run} placeholders.
     mask_path_template: ""
+    # These confound options are inherited by first-level models.
+    confounds:
+      spike_threshold: null
+      spike_following_volumes: 0
+      gsr: false
   # These may be set globally and are inherited by task analyses.
   # atlases: [schaefer200, schaefer400, harvard_oxford_cortical, harvard_oxford_subcortical, aal]
   subject:
@@ -119,6 +124,9 @@ analysis:
               motion_derivatives: true
               framewise_displacement: true
               acompcor: 5
+              spike_threshold: null
+              spike_following_volumes: 0
+              gsr: false
         analyses:
           activation:
             enabled: true

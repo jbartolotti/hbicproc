@@ -104,7 +104,12 @@ def _apply_defaults(config):
             "first_level": {
                 "mask_strategy": "derivative",
                 "nilearn_fallback_mask": True,
-                "mask_path_template": ""
+                "mask_path_template": "",
+                "confounds": {
+                    "spike_threshold": None,
+                    "spike_following_volumes": 0,
+                    "gsr": False,
+                },
             },
             "atlases": [],
             "subject": {
@@ -191,6 +196,11 @@ def validate_config(config):
     _validate_input_dataset(input_dataset, field_name="analysis.input_dataset")
     first_level = analysis.get("first_level", {})
     _validate_first_level_configuration(first_level, field_name="analysis.first_level")
+    if isinstance(first_level, dict) and "confounds" in first_level:
+        _validate_confounds_configuration(
+            first_level["confounds"],
+            field_name="analysis.first_level.confounds",
+        )
     _validate_atlases(analysis.get("atlases", []), field_name="analysis.atlases")
 
     qc_report = config.get("qc_report", {})
@@ -330,6 +340,11 @@ def validate_config(config):
                     field_name=f"analysis.subject.tasks.{task_name}.models.{model_name}",
                     require_template=False,
                 )
+            if "confounds" in model_config:
+                _validate_confounds_configuration(
+                    model_config["confounds"],
+                    field_name=f"analysis.subject.tasks.{task_name}.models.{model_name}.confounds",
+                )
 
         analyses = task_config.get("analyses", {})
         if not isinstance(analyses, dict):
@@ -410,6 +425,28 @@ def _validate_first_level_configuration(value, *, field_name, require_template=T
         template = str(value.get("mask_path_template", "")).strip()
         if not template:
             raise ValueError(f"{field_name}.mask_path_template must not be empty for explicit masking.")
+
+
+def _validate_confounds_configuration(value, *, field_name):
+    if not isinstance(value, dict):
+        if isinstance(value, (list, tuple, set, str, bool)):
+            return
+        raise ValueError(f"{field_name} must be a list, string, boolean, or object.")
+    if "spike_threshold" in value and value["spike_threshold"] is not None:
+        try:
+            threshold = float(value["spike_threshold"])
+        except (TypeError, ValueError):
+            if str(value["spike_threshold"]).strip().lower() not in {"", "none", "null", "na", "nan"}:
+                raise ValueError(f"{field_name}.spike_threshold must be null or a number.") from None
+        else:
+            if threshold < 0:
+                raise ValueError(f"{field_name}.spike_threshold must be non-negative.")
+    if "spike_following_volumes" in value:
+        following = value["spike_following_volumes"]
+        if not isinstance(following, int) or isinstance(following, bool) or following < 0:
+            raise ValueError(f"{field_name}.spike_following_volumes must be a non-negative integer.")
+    if "gsr" in value and not isinstance(value["gsr"], bool):
+        raise ValueError(f"{field_name}.gsr must be a boolean.")
 
 
 def _deep_merge(base, override):

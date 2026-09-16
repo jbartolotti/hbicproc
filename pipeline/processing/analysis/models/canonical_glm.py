@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -27,6 +27,13 @@ class FittedModel:
     events: pd.DataFrame
     confounds: pd.DataFrame | None
     mask_resolution: MaskResolution | None = None
+    confound_metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ConfoundBuildResult:
+    matrix: pd.DataFrame | None
+    metadata: dict[str, Any]
 
 
 class CanonicalGLMModel:
@@ -58,7 +65,8 @@ class CanonicalGLMModel:
                 f"Events file {context.events_path} is missing columns: {', '.join(missing_events)}."
             )
 
-        confounds = self._load_confounds(context)
+        confound_result = self._load_confounds(context)
+        confounds = confound_result.matrix
         configuration = dict(self.spec.configuration)
         mask_resolution = resolve_mask(context, configuration, logger=logger)
         estimator = FirstLevelModel(
@@ -97,6 +105,7 @@ class CanonicalGLMModel:
             events=events,
             confounds=confounds,
             mask_resolution=mask_resolution,
+            confound_metadata=confound_result.metadata,
         )
 
     def write_metadata(self, fitted: FittedModel) -> Path:
@@ -111,6 +120,7 @@ class CanonicalGLMModel:
             "context": fitted.plan.context.as_dict(),
             "fingerprint_configuration": self.spec.fingerprint_configuration,
             "design_columns": list(fitted.estimator.design_matrices_[0].columns),
+            "confounds": fitted.confound_metadata,
             "mask": fitted.mask_resolution.as_dict() if fitted.mask_resolution is not None else None,
         }
         if fitted.mask_resolution is not None:
@@ -232,7 +242,7 @@ class CanonicalGLMModel:
         if residual_paths:
             derivatives["residuals"] = residual_paths
 
-        if fitted.confounds is not None:
+        if fitted.confounds is not None or fitted.confound_metadata:
             motion_path = self._model_file(
                 fitted,
                 subject=context.subject,
@@ -252,13 +262,15 @@ class CanonicalGLMModel:
                 desc="motion-qc-summary",
                 suffix=".json",
             )
-            summary = {
-                "columns": list(fitted.confounds.columns),
-                "rows": int(len(fitted.confounds)),
-                "mean": fitted.confounds.mean().to_dict(),
-                "std": fitted.confounds.std().to_dict(),
-                "maximum": fitted.confounds.max().to_dict(),
-            }
+            summary = dict(fitted.confound_metadata)
+            if fitted.confounds is not None:
+                summary.update({
+                    "columns": list(fitted.confounds.columns),
+                    "rows": int(len(fitted.confounds)),
+                    "mean": fitted.confounds.mean().to_dict(),
+                    "std": fitted.confounds.std().to_dict(),
+                    "maximum": fitted.confounds.max().to_dict(),
+                })
             summary_path.write_text(json.dumps(summary, indent=2, default=str) + "\n", encoding="utf-8")
             derivatives["motion_qc"] = [str(summary_path), str(motion_path)]
 
@@ -287,25 +299,51 @@ class CanonicalGLMModel:
             suffix=suffix,
         )
 
-    def _load_confounds(self, context: TaskRunContext) -> pd.DataFrame | None:
+    def _load_confounds(self, context: TaskRunContext) -> ConfoundBuildResult:
         configuration = self.spec.configuration
         requested = configuration.get("confounds")
-        if not requested:
-            return None
+        settings = requested if isinstance(requested, Mapping) else {}
+        spike_threshold = self._spike_threshold(settings.get("spike_threshold"))
+        following_volumes = settings.get("spike_following_volumes", 0)
+        if not isinstance(following_volumes, int) or isinstance(following_volumes, bool) or following_volumes < 0:
+            raise ValueError("The spike_following_volumes confound option must be a non-negative integer.")
+        gsr_value = settings.get("gsr", False)
+        if not isinstance(gsr_value, bool):
+            raise ValueError("The gsr confound option must be a boolean.")
+        gsr = gsr_value
+        metadata: dict[str, Any] = {
+            "spike_threshold": spike_threshold,
+            "spike_following_volumes": following_volumes,
+            "spike_columns": [],
+            "number_of_spike_regressors": 0,
+            "percent_volumes_flagged": 0.0,
+            "global_signal_included": False,
+        }
+        has_requested_confounds = bool(requested) and not (
+            isinstance(requested, Mapping)
+            and not any(
+                key not in {"spike_threshold", "spike_following_volumes", "gsr"}
+                and bool(value)
+                for key, value in requested.items()
+            )
+        )
+        needs_confounds_file = has_requested_confounds or spike_threshold is not None or gsr
+        if not needs_confounds_file:
+            return ConfoundBuildResult(None, {})
         if context.confounds_path is None or not context.confounds_path.exists():
             raise FileNotFoundError("Configured confounds require an existing confounds file.")
 
         confounds = pd.read_csv(context.confounds_path, sep="\t")
         columns, missing = self._confound_columns(requested, confounds.columns)
+        if spike_threshold is not None and "framewise_displacement" not in confounds.columns:
+            missing.append("framewise_displacement")
         if missing:
             raise ValueError(
                 f"Confounds file {context.confounds_path} is missing required columns: "
                 f"{', '.join(missing)}."
             )
         selected = [column for column in columns if column in confounds.columns]
-        if not selected:
-            return None
-        result = confounds.loc[:, selected].copy()
+        result = confounds.loc[:, selected].copy() if selected else pd.DataFrame(index=confounds.index)
         try:
             result = result.apply(pd.to_numeric, errors="raise")
         except (TypeError, ValueError) as exc:
@@ -314,7 +352,44 @@ class CanonicalGLMModel:
             ) from exc
         if result.isna().any().any():
             result = result.fillna(0)
-        return result
+        if gsr:
+            metadata["global_signal_included"] = "global_signal" in result.columns
+
+        if spike_threshold is not None:
+            fd = pd.to_numeric(confounds["framewise_displacement"], errors="coerce").fillna(0.0)
+            flagged_indices: set[int] = set()
+            for index in fd.index[fd > spike_threshold]:
+                start = int(index)
+                flagged_indices.update(range(start, min(start + following_volumes + 1, len(fd))))
+            spike_columns = []
+            for index in sorted(flagged_indices):
+                column = f"spike_{index:04d}"
+                result[column] = 0.0
+                result.loc[index, column] = 1.0
+                spike_columns.append(column)
+            metadata["spike_columns"] = spike_columns
+            metadata["number_of_spike_regressors"] = len(spike_columns)
+            metadata["percent_volumes_flagged"] = 100.0 * len(flagged_indices) / len(fd) if len(fd) else 0.0
+
+        if result.empty and not metadata["spike_columns"]:
+            return ConfoundBuildResult(None, metadata)
+        return ConfoundBuildResult(result, metadata)
+
+    @staticmethod
+    def _spike_threshold(value: Any) -> float | None:
+        if value is None:
+            return None
+        if isinstance(value, str) and value.strip().lower() in {"", "none", "null", "na", "nan"}:
+            return None
+        try:
+            threshold = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("The spike_threshold confound option must be null or numeric.") from exc
+        if threshold < 0:
+            raise ValueError("The spike_threshold confound option must be non-negative.")
+        if threshold == 0:
+            return None
+        return threshold
 
     @staticmethod
     def _confound_columns(requested: Any, available: pd.Index) -> tuple[list[str], list[str]]:
@@ -343,6 +418,10 @@ class CanonicalGLMModel:
                     ])
                 elif group_name == "framewise_displacement":
                     expanded.append(group_name)
+                elif group_name == "gsr":
+                    expanded.append("global_signal")
+                elif group_name in {"spike_threshold", "spike_following_volumes"}:
+                    continue
                 elif group_name == "acompcor":
                     if not isinstance(enabled, int) or isinstance(enabled, bool) or enabled < 1:
                         raise ValueError("The acompcor confound group must be a positive integer.")

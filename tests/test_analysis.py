@@ -69,6 +69,32 @@ def test_configured_tasks_default_to_enabled_and_resolve_dataset_paths(tmp_path:
     assert Path(config["analysis"]["subject"]["tasks"]["rest"]["input_dataset"]["path"]).is_absolute()
 
 
+def test_first_level_confound_options_are_validated(tmp_path: Path) -> None:
+    config_path = tmp_path / "pipeline_config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "analysis": {
+                    "first_level": {
+                        "confounds": {
+                            "spike_threshold": 0.5,
+                            "spike_following_volumes": 2,
+                            "gsr": True,
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config["analysis"]["first_level"]["confounds"]["spike_threshold"] == 0.5
+    assert config["analysis"]["first_level"]["confounds"]["spike_following_volumes"] == 2
+    assert config["analysis"]["first_level"]["confounds"]["gsr"] is True
+
+
 def test_old_activation_configuration_is_rejected(tmp_path: Path) -> None:
     config_path = tmp_path / "pipeline_config.yaml"
     config_path.write_text(
@@ -236,6 +262,72 @@ def test_canonical_glm_fits_one_run_with_events_and_confounds(tmp_path: Path, mo
     assert pd.read_csv(design_matrix_path, sep="\t").shape == (1, 2)
     assert not (design_matrix_path.parent / "sufficient_statistics.npz").exists()
     assert not (design_matrix_path.parent / "sufficient_statistics.json").exists()
+
+
+def _confound_result(tmp_path: Path, configuration: dict, contents: str):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    confounds_path = tmp_path / "confounds.tsv"
+    confounds_path.write_text(contents, encoding="utf-8")
+    model = CanonicalGLMModel(ModelSpec("canonical_glm", "canonical_glm", configuration))
+    context = TaskRunContext(subject="001", task="nback", run="1", confounds_path=confounds_path)
+    return model._load_confounds(context)
+
+
+def test_spike_regression_disabled(tmp_path: Path) -> None:
+    result = _confound_result(
+        tmp_path,
+        {"confounds": {"spike_threshold": None}},
+        "framewise_displacement\n0.1\n0.8\n",
+    )
+
+    assert result.matrix is None
+    assert result.metadata == {}
+
+
+def test_spike_regression_threshold_and_following_volumes(tmp_path: Path) -> None:
+    result = _confound_result(
+        tmp_path,
+        {"confounds": {"spike_threshold": 0.5, "spike_following_volumes": 1}},
+        "framewise_displacement\n0.1\n0.8\n0.2\n0.9\n0.1\n",
+    )
+
+    assert list(result.matrix.columns) == ["spike_0001", "spike_0002", "spike_0003", "spike_0004"]
+    assert result.metadata["number_of_spike_regressors"] == 4
+    assert result.metadata["percent_volumes_flagged"] == pytest.approx(80.0)
+    assert result.matrix["spike_0001"].tolist() == [0.0, 1.0, 0.0, 0.0, 0.0]
+    assert result.matrix["spike_0002"].tolist() == [0.0, 0.0, 1.0, 0.0, 0.0]
+
+
+def test_spike_regression_overlapping_windows_are_unique(tmp_path: Path) -> None:
+    result = _confound_result(
+        tmp_path,
+        {"confounds": {"spike_threshold": 0.5, "spike_following_volumes": 2}},
+        "framewise_displacement\n0.8\n0.9\n0.1\n0.1\n",
+    )
+
+    assert result.metadata["spike_columns"] == ["spike_0000", "spike_0001", "spike_0002", "spike_0003"]
+
+
+def test_spike_regression_no_detected_spikes_and_missing_fd_values(tmp_path: Path) -> None:
+    result = _confound_result(
+        tmp_path,
+        {"confounds": {"spike_threshold": 0.5}},
+        "framewise_displacement\nNaN\n0.1\n",
+    )
+
+    assert result.matrix is None
+    assert result.metadata["percent_volumes_flagged"] == 0.0
+
+
+def test_global_signal_regression_can_be_enabled_or_disabled(tmp_path: Path) -> None:
+    contents = "global_signal\ttrans_x\n1.0\t0.1\n2.0\t0.2\n"
+    enabled = _confound_result(tmp_path / "enabled", {"confounds": {"gsr": True}}, contents)
+    disabled = _confound_result(tmp_path / "disabled", {"confounds": {"gsr": False}}, contents)
+
+    assert list(enabled.matrix.columns) == ["global_signal"]
+    assert enabled.metadata["global_signal_included"] is True
+    assert disabled.matrix is None
+    assert disabled.metadata == {}
 
 
 def test_activation_analysis_computes_contrasts_from_fitted_model(tmp_path: Path) -> None:

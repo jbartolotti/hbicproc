@@ -47,6 +47,11 @@ def test_default_first_level_configuration_uses_derivative_and_fallback() -> Non
         "mask_strategy": "derivative",
         "nilearn_fallback_mask": True,
         "mask_path_template": "",
+        "confounds": {
+            "spike_threshold": None,
+            "spike_following_volumes": 0,
+            "gsr": False,
+        },
     }
 
 
