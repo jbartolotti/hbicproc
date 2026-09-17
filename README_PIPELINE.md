@@ -66,6 +66,50 @@ BIDS paths, Singularity images, and exclusions file. The sample is the single au
 the loader's default filename remains `pipeline_config.yaml` so the working configuration is not confused
 with the template.
 
+### Study decision manifests
+
+Investigator-authored analysis decisions are kept in version-controlled YAML manifests under
+`code/decisions/`. Register them by analysis ID in `pipeline_config.yaml`:
+
+```yaml
+decisions:
+  primary_nback: code/decisions/primary_nback.yaml
+```
+
+Each manifest must contain `schema_version: 1` and an `analysis_id` matching its registered name.
+The configuration loader resolves the manifest path relative to the configuration file; the decision
+loader also records a SHA-256 content hash for provenance. Decision manifests are intended for
+study-level choices such as sample selection, contrasts, atlases, mask sources, and modeling decisions.
+They are separate from automatically generated derivatives and reports.
+
+Population rules are discrete selectors. Each selector requires a subject and may optionally include
+a session and run:
+
+```yaml
+population:
+  include:
+    - subject: sub-001
+      session: BL
+  exclude:
+    - subject: sub-001
+      session: W12
+    - subject: sub-002
+      session: BL
+      run: 2
+```
+
+Omitting `session` selects or excludes all sessions for that subject; omitting `run` selects or
+excludes all runs for that subject/session. A group analysis can select one registered manifest
+with `group.one_sample.decision`; its population rules are applied to discovered effect maps before
+model fitting.
+
+The same `decision` field is available on `group.activation` and `group.dmn`; those analyses apply
+the manifest population rules before constructing their design or summary tables.
+
+The initial manifest loader does not yet change subject-level or group execution. Future stages can
+consume a named manifest and write a resolved snapshot and realized sample table under
+`derivatives/hbicproc/analyses/<analysis_id>/`.
+
 ### fMRIPrep configuration
 
 The `fmriprep` section controls the `preprocess` stage, including optional FreeSurfer / FastSurfer integration.

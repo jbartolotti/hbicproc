@@ -9,9 +9,16 @@ from .atlas_metadata import AtlasMetadata
 from .discovery import discover_atlas_activation_summaries
 from .participants import add_factor_columns, load_participants
 from ..analysis.analyses.atlas import AtlasCache
+from ...decisions import DecisionManifest
+from .population import select_records
 
 
-def run_dmn(config: dict, specification: dict) -> dict:
+def run_dmn(
+    config: dict,
+    specification: dict,
+    *,
+    decision_manifest: DecisionManifest | None = None,
+) -> dict:
     analysis = config["analysis"]
     derivatives_root = Path(analysis["output_dir"])
     bids_root = Path(config.get("bids_root") or config.get("study_root", "."))
@@ -43,6 +50,8 @@ def run_dmn(config: dict, specification: dict) -> dict:
         selected["dmn_value"] = _contrast_values(selected, contrast_name)
         selected = selected.dropna(subset=["dmn_value"])
         subject_values = selected.groupby(["subject", "session"], dropna=False)["dmn_value"].mean().reset_index()
+        if decision_manifest is not None:
+            subject_values = select_records(subject_values, decision_manifest.population)
         subject_values["contrast"] = contrast_name
         rows.append(add_factor_columns(subject_values, participants, factors)[
             ["subject", "session", "group", "contrast", "dmn_value"]
@@ -68,6 +77,15 @@ def run_dmn(config: dict, specification: dict) -> dict:
         "values": str(values_path),
         "stats": str(stats_path),
         "report": str(report_path),
+        "decision": (
+            {
+                "analysis_id": decision_manifest.analysis_id,
+                "path": str(decision_manifest.path),
+                "content_hash": decision_manifest.content_hash,
+            }
+            if decision_manifest is not None
+            else None
+        ),
     }
 
 

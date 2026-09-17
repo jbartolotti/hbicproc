@@ -45,6 +45,7 @@ def _apply_defaults(config):
         "code_dir": "code",
         "email": "",
         "log_dir": "",
+        "decisions": {},
         "tokens": {
             "anat": ["mprage", "t1", "t2", "anat", "mpr", "sag", "t1w", "t2w"],
             "func": ["bold", "fmri", "rest", "nback", "flanker", "task", "functional", "sbref"],
@@ -191,6 +192,15 @@ def validate_config(config):
         raise ValueError("The 'analysis' configuration must be an object.")
     if not str(analysis.get("output_dir", "")).strip():
         raise ValueError("analysis.output_dir must not be empty.")
+
+    decisions = config.get("decisions", {})
+    if not isinstance(decisions, dict):
+        raise ValueError("The 'decisions' configuration must be an object keyed by analysis ID.")
+    for analysis_id, manifest_path in decisions.items():
+        if not str(analysis_id).strip():
+            raise ValueError("decisions keys must be non-empty analysis IDs.")
+        if not isinstance(manifest_path, str) or not manifest_path.strip():
+            raise ValueError(f"decisions.{analysis_id} must be a non-empty manifest path.")
 
     input_dataset = analysis.get("input_dataset")
     _validate_input_dataset(input_dataset, field_name="analysis.input_dataset")
@@ -339,6 +349,13 @@ def validate_config(config):
             raise ValueError("group.one_sample.inference.alpha must be between 0 and 1.")
     if "task" in one_sample and not str(one_sample["task"]).strip():
         raise ValueError("group.one_sample.task must not be empty when provided.")
+    if "decision" in one_sample and not str(one_sample["decision"]).strip():
+        raise ValueError("group.one_sample.decision must not be empty when provided.")
+    for analysis_name in ("activation", "dmn"):
+        analysis_specification = group.get(analysis_name, {})
+        if isinstance(analysis_specification, dict) and "decision" in analysis_specification:
+            if not str(analysis_specification["decision"]).strip():
+                raise ValueError(f"group.{analysis_name}.decision must not be empty when provided.")
     sessions = one_sample.get("sessions", [])
     if isinstance(sessions, str):
         sessions = [sessions]
@@ -524,6 +541,13 @@ def _resolve_paths(config, root_dir):
     if not config.get("code_dir"):
         config["code_dir"] = str(Path(study_root) / "code")
     config["code_dir"] = str(_resolve_path(config["code_dir"], root_dir, study_root))
+
+    decisions = config.get("decisions", {})
+    if isinstance(decisions, dict):
+        config["decisions"] = {
+            analysis_id: str(_resolve_path(path, root_dir, study_root))
+            for analysis_id, path in decisions.items()
+        }
 
     if config.get("bids_root"):
         config["bids_root"] = str(_resolve_path(config["bids_root"], root_dir, study_root))

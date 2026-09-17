@@ -7,6 +7,10 @@ code_dir: code                 # Study-specific scripts and behavior configurati
 email: ""                     # Optional notification email. Default: empty.
 log_dir: ""                   # Log directory. Empty uses <study_root>/logs.
 
+decisions:
+  # Investigator-authored analysis decision manifests. Paths are relative to this file.
+  # primary_nback: code/decisions/primary_nback.yaml
+
 tokens:
   # Filename tokens used by BIDS conversion when classifying scans.
   anat: [mprage, t1, t2, anat, mpr, sag, t1w, t2w]
@@ -153,6 +157,8 @@ group:
   # Group analyses consume existing subject-level derivatives only.
   one_sample:
     enabled: false
+    # Optional registered investigator decision manifest for population selection.
+    # decision: primary_nback
     # Optional task filter. If omitted, the requested contrast must resolve to one task.
     task: nback
     # Optional session filter. Omit to analyze every discovered session independently.
@@ -166,6 +172,8 @@ group:
       alpha: 0.05
   activation:
     enabled: false
+    # Optional registered investigator decision manifest for population selection.
+    # decision: primary_nback
     task: nback
     contrasts: [2back_gt_1back, 2back_gt_baseline, 1back_gt_baseline]
     factors:
@@ -179,6 +187,8 @@ group:
           W12: followup
   dmn:
     enabled: false
+    # Optional registered investigator decision manifest for population selection.
+    # decision: primary_nback
     task: nback
     contrasts: [2back_gt_1back, 2back_gt_baseline, 1back_gt_baseline]
     atlas: schaefer200

@@ -17,6 +17,8 @@ from nilearn.plotting import plot_stat_map, view_img
 from .discovery import discover_effect_maps
 from .inference import InferenceResult, create_inference_method
 from .participants import load_participants
+from .population import select_records
+from ...decisions import DecisionManifest
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +44,17 @@ def _configured_sessions(value: Any) -> list[str]:
     return list(dict.fromkeys(_session_value(item) for item in values if str(item).strip()))
 
 
-def _select_records(records: pd.DataFrame, participants: pd.DataFrame, specification: dict[str, Any]) -> pd.DataFrame:
+def _select_records(
+    records: pd.DataFrame,
+    participants: pd.DataFrame,
+    specification: dict[str, Any],
+    decision_manifest: DecisionManifest | None = None,
+) -> pd.DataFrame:
     if records.empty:
         return records
     selected = records.merge(participants[["subject"]], on="subject", how="inner", validate="many_to_one")
+    if decision_manifest is not None:
+        selected = select_records(selected, decision_manifest.population)
     selected["session"] = selected["session"].fillna("n/a").astype(str)
     selected["task"] = selected["task"].fillna("n/a").astype(str)
     sessions = _configured_sessions(specification.get("sessions"))
@@ -166,7 +175,12 @@ def _write_report(path: Path, sections: list[dict[str, Any]]) -> None:
     )
 
 
-def run_one_sample(config: dict[str, Any], specification: dict[str, Any]) -> dict[str, Any]:
+def run_one_sample(
+    config: dict[str, Any],
+    specification: dict[str, Any],
+    *,
+    decision_manifest: DecisionManifest | None = None,
+) -> dict[str, Any]:
     analysis_root = Path(config["analysis"]["output_dir"])
     bids_root = Path(config.get("bids_root") or config.get("study_root", "."))
     participants = load_participants(bids_root)
@@ -182,7 +196,7 @@ def run_one_sample(config: dict[str, Any], specification: dict[str, Any]) -> dic
         records = discover_effect_maps(analysis_root, contrast=contrast, task=specification.get("task"))
         if records.empty:
             raise FileNotFoundError(f"No effect maps found for configured contrast '{contrast}'.")
-        records = _select_records(records, participants, specification)
+        records = _select_records(records, participants, specification, decision_manifest)
         if records.empty:
             raise FileNotFoundError(f"No participant maps remain for contrast '{contrast}' and configured sessions.")
         for (session, task), session_records in records.groupby(["session", "task"], sort=True):
@@ -231,6 +245,15 @@ def run_one_sample(config: dict[str, Any], specification: dict[str, Any]) -> dic
         "report_type": "one_sample_group",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "configuration": specification,
+        "decision": (
+            {
+                "analysis_id": decision_manifest.analysis_id,
+                "path": str(decision_manifest.path),
+                "content_hash": decision_manifest.content_hash,
+            }
+            if decision_manifest is not None
+            else None
+        ),
         "results": results,
         "report": str(report_path),
     }

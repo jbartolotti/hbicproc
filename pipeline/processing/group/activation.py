@@ -10,6 +10,8 @@ from nilearn.glm.second_level import SecondLevelModel
 
 from .discovery import discover_effect_maps
 from .participants import add_factor_columns, load_participants
+from .population import select_records
+from ...decisions import DecisionManifest
 
 
 def _component(value: str) -> str:
@@ -40,7 +42,12 @@ def _activation_design(records: pd.DataFrame, factors: dict[str, Any]) -> tuple[
     return design, {"group": group_levels, "session": session_levels}
 
 
-def run_activation(config: dict[str, Any], specification: dict[str, Any]) -> dict[str, Any]:
+def run_activation(
+    config: dict[str, Any],
+    specification: dict[str, Any],
+    *,
+    decision_manifest: DecisionManifest | None = None,
+) -> dict[str, Any]:
     analysis = config["analysis"]
     derivatives_root = Path(analysis["output_dir"])
     bids_root = Path(config.get("bids_root") or config.get("study_root", "."))
@@ -57,6 +64,12 @@ def run_activation(config: dict[str, Any], specification: dict[str, Any]) -> dic
         records = discover_effect_maps(derivatives_root, task=task, contrast=contrast_name)
         if records.empty:
             raise FileNotFoundError(f"No effect maps found for configured contrast '{contrast_name}'.")
+        if decision_manifest is not None:
+            records = select_records(records, decision_manifest.population)
+        if records.empty:
+            raise FileNotFoundError(
+                f"No participant maps remain for contrast '{contrast_name}' after decision selection."
+            )
         records = add_factor_columns(records, participants, factors)
         records = records.dropna(subset=["group", "session"])
         design, levels = _activation_design(records, factors)

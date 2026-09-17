@@ -1,0 +1,27 @@
+schema_version: 1
+analysis_id: primary_nback
+description: Primary baseline n-back activation analysis
+
+population:
+  # Session and run are optional. Omit both to select or exclude a whole subject.
+  include: []
+  exclude: []
+
+analysis:
+  task: nback
+  contrasts:
+    - 1back_gt_baseline
+    - 2back_gt_baseline
+    - 2back_gt_1back
+  atlases:
+    - schaefer200
+  mask_source: derivative
+
+modeling:
+  first_level_model: canonical_glm
+  group_model: one_sample
+
+provenance:
+  investigator: ""
+  decision_date: ""
+  rationale: ""

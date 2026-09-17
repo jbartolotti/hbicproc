@@ -5,6 +5,7 @@ from typing import Any
 from .activation import run_activation
 from .dmn import run_dmn
 from .one_sample import run_one_sample
+from ...decisions import load_configured_decisions
 
 
 def run(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
@@ -19,16 +20,44 @@ def run(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
     results = {}
     one_sample = group.get("one_sample", {})
     if isinstance(one_sample, dict) and one_sample.get("enabled", False):
-        results["one_sample"] = run_one_sample(config, one_sample)
+        decision_manifest = _decision_manifest(config, one_sample, "group.one_sample")
+        results["one_sample"] = run_one_sample(
+            config,
+            one_sample,
+            decision_manifest=decision_manifest,
+        )
     activation = group.get("activation", {})
     if isinstance(activation, dict) and activation.get("enabled", False):
-        results["activation"] = run_activation(config, activation)
+        results["activation"] = run_activation(
+            config,
+            activation,
+            decision_manifest=_decision_manifest(config, activation, "group.activation"),
+        )
     dmn = group.get("dmn", {})
     if isinstance(dmn, dict) and dmn.get("enabled", False):
-        results["dmn"] = run_dmn(config, dmn)
+        results["dmn"] = run_dmn(
+            config,
+            dmn,
+            decision_manifest=_decision_manifest(config, dmn, "group.dmn"),
+        )
     return {
         "success": True,
         "skipped": not results,
         "message": "Group analyses completed." if results else "No group analyses are enabled.",
         "details": results,
     }
+
+
+def _decision_manifest(
+    config: dict[str, Any], specification: dict[str, Any], field_name: str
+):
+    decision_id = str(specification.get("decision", "")).strip()
+    if not decision_id:
+        return None
+    decisions = load_configured_decisions(config)
+    if decision_id not in decisions:
+        available = ", ".join(sorted(decisions)) or "none"
+        raise ValueError(
+            f"{field_name}.decision '{decision_id}' is not registered; available decisions: {available}."
+        )
+    return decisions[decision_id]
