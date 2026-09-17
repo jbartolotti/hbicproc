@@ -109,7 +109,7 @@ def _montages(
         figure = plt.figure(figsize=(max(8, len(cut_coords) * 1.2), 2.5))
         display = plot_stat_map(
             str(inference.thresholded_map), display_mode="z", cut_coords=cut_coords,
-            threshold=0, colorbar=True, cmap="RdBu_r", symmetric_cmap=True,
+            threshold=0, colorbar=True, cmap="RdBu_r", symmetric_cbar=True,
             radiological=False, figure=figure, title=title + " thresholded",
         )
         figure.savefig(thresholded_figure, dpi=180, bbox_inches="tight")
@@ -118,7 +118,7 @@ def _montages(
         figure = plt.figure(figsize=(max(8, len(cut_coords) * 1.2), 2.5))
         display = plot_stat_map(
             str(inference.stat_map), display_mode="z", cut_coords=cut_coords,
-            threshold=0, colorbar=True, cmap="RdBu_r", symmetric_cmap=True,
+            threshold=0, colorbar=True, cmap="RdBu_r", symmetric_cbar=True,
             radiological=False, figure=figure, title=title + " unthresholded",
         )
         display.add_contours(str(inference.significance_mask), levels=[0.5], colors="black", linewidths=1.2)

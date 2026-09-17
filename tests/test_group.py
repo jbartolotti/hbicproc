@@ -8,8 +8,8 @@ import pytest
 from pipeline.processing.group.activation import run_activation
 from pipeline.processing.group.atlas_metadata import AtlasMetadata
 from pipeline.processing.group.discovery import discover_effect_maps
-from pipeline.processing.group.inference import create_inference_method
-from pipeline.processing.group.one_sample import run_one_sample
+from pipeline.processing.group.inference import InferenceResult, create_inference_method
+from pipeline.processing.group.one_sample import _montages, run_one_sample
 from pipeline.processing.group.participants import add_factor_columns, load_participants
 from pipeline.config import _apply_defaults, validate_config
 
@@ -282,3 +282,40 @@ def test_fdr_inference_returns_common_result_products(tmp_path: Path) -> None:
     assert result.metadata["method"] == "fdr"
     assert result.metadata["alpha"] == 0.05
     assert "computed_threshold" in result.metadata
+
+
+def test_static_montages_use_nilearn_symmetric_colorbar_api(tmp_path: Path, monkeypatch) -> None:
+    shape = (4, 4, 4)
+    stat_map = tmp_path / "stat.nii.gz"
+    thresholded_map = tmp_path / "thresholded.nii.gz"
+    significance_mask = tmp_path / "mask.nii.gz"
+    nib.save(nib.Nifti1Image(np.ones(shape), np.eye(4)), stat_map)
+    nib.save(nib.Nifti1Image(np.ones(shape), np.eye(4)), thresholded_map)
+    nib.save(nib.Nifti1Image(np.ones(shape), np.eye(4)), significance_mask)
+    cluster_table = tmp_path / "clusters.tsv"
+    cluster_table.write_text("cluster_index\n1\n", encoding="utf-8")
+    inference = InferenceResult(
+        stat_map=stat_map,
+        thresholded_map=thresholded_map,
+        significance_mask=significance_mask,
+        cluster_table=cluster_table,
+        metadata={"method": "fdr"},
+    )
+    calls = []
+
+    class FakeDisplay:
+        def add_contours(self, *args, **kwargs):
+            return None
+
+    def fake_plot_stat_map(*args, **kwargs):
+        calls.append(kwargs)
+        return FakeDisplay()
+
+    monkeypatch.setattr("pipeline.processing.group.one_sample.plot_stat_map", fake_plot_stat_map)
+    _montages(inference, tmp_path / "thresholded.png", tmp_path / "unthresholded.png", "test")
+
+    assert len(calls) == 2
+    assert all(call["symmetric_cbar"] is True for call in calls)
+    assert all("symmetric_cmap" not in call for call in calls)
+    assert (tmp_path / "thresholded.png").exists()
+    assert (tmp_path / "unthresholded.png").exists()
