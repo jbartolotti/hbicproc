@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 import pandas as pd
+import yaml
 
 from pipeline.config import _apply_defaults, _resolve_paths, validate_config
 from pipeline.decisions import load_configured_decisions, load_decision_manifest
@@ -43,31 +44,36 @@ def test_decision_manifest_requires_supported_schema(tmp_path: Path) -> None:
 
 
 def test_population_rules_select_subject_sessions_and_runs() -> None:
+    numeric_subject = yaml.safe_load("subject: 001")["subject"]
     records = pd.DataFrame(
         [
             {"subject": "001", "session": "BL", "run": "1"},
             {"subject": "001", "session": "BL", "run": "2"},
-            {"subject": "001", "session": "W12", "run": "1"},
-            {"subject": "002", "session": "BL", "run": "1"},
+            {"subject": "001", "session": "w12", "run": "1"},
+            {"subject": "002", "session": "week1", "run": "1"},
+            {"subject": "002", "session": "week2", "run": "1"},
+            {"subject": "002", "session": "week3", "run": "1"},
         ]
     )
 
     selected = select_records(
         records,
         {
-            "exclude": [{"subject": "sub-001", "session": "BL"}],
+            "exclude": [
+                {"subject": numeric_subject, "session": ["ses-BL", "w12"]},
+                {"subject": "sub-002", "session": ["ses-week1", "ses-week3"]},
+            ],
         },
     )
 
     assert selected[["subject", "session", "run"]].to_dict("records") == [
-        {"subject": "001", "session": "W12", "run": "1"},
-        {"subject": "002", "session": "BL", "run": "1"},
+        {"subject": "002", "session": "week2", "run": "1"},
     ]
 
     selected_run = select_records(
         records,
         {
-            "include": [{"subject": "sub-001", "session": "ses-BL"}],
+            "include": [{"subject": numeric_subject, "session": "ses-BL"}],
             "exclude": [{"subject": "sub-001", "session": "BL", "run": 2}],
         },
     )

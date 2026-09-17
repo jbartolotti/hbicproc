@@ -109,9 +109,12 @@ def _validate_population(value: Any, manifest_path: Path) -> None:
                     f"Decision manifest population.{field_name}[{index}] has unsupported fields: {names}."
                 )
             for entity_name in ("session", "run"):
-                if entity_name in rule and not str(rule[entity_name]).strip():
+                if entity_name not in rule:
+                    continue
+                values = rule[entity_name] if isinstance(rule[entity_name], list) else [rule[entity_name]]
+                if not values or not all(str(value).strip() for value in values):
                     raise ValueError(
-                        f"Decision manifest population.{field_name}[{index}].{entity_name} must not be empty."
+                        f"Decision manifest population.{field_name}[{index}].{entity_name} must be a non-empty value or list."
                     )
 
 

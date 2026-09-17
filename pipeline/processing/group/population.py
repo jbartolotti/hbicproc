@@ -34,12 +34,27 @@ def _matches_any(row: pd.Series, rules: Any) -> bool:
 
 
 def _matches_rule(row: pd.Series, rule: Mapping[str, Any]) -> bool:
-    if _entity_value(rule.get("subject", "")) != row["subject"]:
+    if not _matches_entity(rule.get("subject", ""), row["subject"], numeric=True):
         return False
     for field_name in ("session", "run"):
-        if field_name in rule and _entity_value(rule[field_name]) != row[field_name]:
-            return False
+        if field_name in rule:
+            values = rule[field_name] if isinstance(rule[field_name], (list, tuple, set)) else [rule[field_name]]
+            if not any(
+                _matches_entity(value, row[field_name], numeric=field_name == "run")
+                for value in values
+            ):
+                return False
     return True
+
+
+def _matches_entity(configured: Any, observed: Any, *, numeric: bool) -> bool:
+    configured_value = _entity_value(configured)
+    observed_value = _entity_value(observed)
+    if configured_value == observed_value:
+        return True
+    if numeric and configured_value.isdigit() and observed_value.isdigit():
+        return int(configured_value) == int(observed_value)
+    return False
 
 
 def _entity_value(value: Any) -> str:
