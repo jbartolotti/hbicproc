@@ -1,11 +1,17 @@
 from pathlib import Path
 
+import nibabel as nib
+import numpy as np
 import pandas as pd
+import pytest
 
 from pipeline.processing.group.activation import run_activation
 from pipeline.processing.group.atlas_metadata import AtlasMetadata
 from pipeline.processing.group.discovery import discover_effect_maps
+from pipeline.processing.group.inference import create_inference_method
+from pipeline.processing.group.one_sample import run_one_sample
 from pipeline.processing.group.participants import add_factor_columns, load_participants
+from pipeline.config import _apply_defaults, validate_config
 
 
 def test_group_derivative_discovery_and_participant_session_join(tmp_path: Path) -> None:
@@ -118,3 +124,161 @@ def test_group_activation_fits_configured_effect_maps(tmp_path: Path, monkeypatc
         sep="\t",
     )
     assert list(design.columns) == ["intercept", "group", "session", "group_session"]
+
+
+def test_one_sample_runs_each_session_and_respects_session_filter(tmp_path: Path, monkeypatch) -> None:
+    bids_root = tmp_path / "bids"
+    derivative_root = tmp_path / "derivatives" / "hbicproc"
+    bids_root.mkdir(parents=True)
+    (bids_root / "participants.tsv").write_text(
+        "participant_id\nsub-001\nsub-002\n", encoding="utf-8"
+    )
+    for session in ("BL", "w12"):
+        for subject in ("001", "002"):
+            path = (
+                derivative_root / f"sub-{subject}" / f"ses-{session}" / "func" / "task-nback"
+                / "analyses" / "activation"
+                / f"sub-{subject}_ses-{session}_task-nback_desc-memory_stat-effect.nii.gz"
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            nib.save(nib.Nifti1Image(np.ones((3, 3, 3), dtype=float), np.eye(4)), path)
+
+    class FakeImage:
+        def __init__(self, value: float):
+            self.value = value
+
+        def to_filename(self, path: Path) -> None:
+            data = np.zeros((3, 3, 3), dtype=float)
+            data[1, 1, 1] = self.value
+            nib.save(nib.Nifti1Image(data, np.eye(4)), path)
+
+    class FakeSecondLevelModel:
+        fit_count = 0
+
+        def __init__(self, **kwargs):
+            self.design_matrix = None
+
+        def fit(self, images, design_matrix):
+            self.design_matrix = design_matrix
+            FakeSecondLevelModel.fit_count += 1
+            return self
+
+        def compute_contrast(self, vector, output_type):
+            return FakeImage(2.0 if output_type == "effect_size" else 4.0)
+
+    class FakeViewer:
+        def save_as_html(self, path: str) -> None:
+            Path(path).write_text("<html>viewer</html>", encoding="utf-8")
+
+    monkeypatch.setattr("pipeline.processing.group.one_sample.SecondLevelModel", FakeSecondLevelModel)
+    monkeypatch.setattr("pipeline.processing.group.one_sample.view_img", lambda *args, **kwargs: FakeViewer())
+    monkeypatch.setattr(
+        "pipeline.processing.group.one_sample._montages",
+        lambda *args: (args[1].write_bytes(b"png"), args[2].write_bytes(b"png")),
+    )
+
+    config = {
+        "bids_root": str(bids_root),
+        "study_root": str(tmp_path),
+        "analysis": {"output_dir": str(derivative_root)},
+    }
+    specification = {
+        "enabled": True,
+        "task": "nback",
+        "contrasts": ["memory"],
+        "inference": {"method": "fdr", "alpha": 0.05},
+    }
+
+    result = run_one_sample(config, specification)
+
+    assert FakeSecondLevelModel.fit_count == 2
+    assert {(row["session"], row["n_subjects"]) for row in result["results"]} == {
+        ("BL", 2),
+        ("w12", 2),
+    }
+    assert (derivative_root / "group" / "one_sample_group_report.html").exists()
+    assert len(list((derivative_root / "group" / "one_sample").rglob("viewer.html"))) == 2
+
+    filtered = run_one_sample(config, {**specification, "sessions": ["BL"]})
+
+    assert len(filtered["results"]) == 1
+    assert filtered["results"][0]["session"] == "BL"
+
+    no_clusters = run_one_sample(
+        config, {**specification, "sessions": ["BL"], "inference": {"method": "fdr", "alpha": 1e-6}}
+    )
+    assert no_clusters["results"][0]["n_clusters"] == 0
+    assert "No clusters survived" in (derivative_root / "group" / "one_sample_group_report.html").read_text(encoding="utf-8")
+
+
+def test_one_sample_rejects_multiple_tasks_without_task_filter(tmp_path: Path) -> None:
+    bids_root = tmp_path / "bids"
+    derivative_root = tmp_path / "derivatives" / "hbicproc"
+    bids_root.mkdir(parents=True)
+    (bids_root / "participants.tsv").write_text("participant_id\nsub-001\n", encoding="utf-8")
+    for task in ("nback", "stroop"):
+        path = derivative_root / "sub-001" / "func" / f"task-{task}" / "analyses" / "activation" / f"sub-001_task-{task}_desc-memory_stat-effect.nii.gz"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        nib.save(nib.Nifti1Image(np.ones((2, 2, 2), dtype=float), np.eye(4)), path)
+
+    with pytest.raises(ValueError, match="multiple tasks"):
+        run_one_sample(
+            {"bids_root": str(bids_root), "analysis": {"output_dir": str(derivative_root)}},
+            {"contrasts": ["memory"], "inference": {"method": "fdr", "alpha": 0.05}},
+        )
+
+
+def test_one_sample_configuration_validates_session_and_cluster_settings() -> None:
+    config = _apply_defaults({
+        "group": {
+            "one_sample": {
+                "enabled": True,
+                "contrasts": ["memory"],
+                "sessions": ["BL"],
+                "inference": {"method": "fdr", "alpha": 0.05},
+            }
+        }
+    })
+    validate_config(config)
+
+    invalid = _apply_defaults({
+        "group": {
+            "one_sample": {
+                "enabled": True,
+                "contrasts": ["memory"],
+                "sessions": [""],
+                "inference": {"method": "fdr", "alpha": 0.05},
+            }
+        }
+    })
+    with pytest.raises(ValueError, match="sessions"):
+        validate_config(invalid)
+
+    invalid["group"]["one_sample"]["sessions"] = ["BL"]
+    invalid["group"]["one_sample"]["inference"]["alpha"] = 0
+    with pytest.raises(ValueError, match="alpha"):
+        validate_config(invalid)
+
+    invalid["group"]["one_sample"]["inference"]["alpha"] = 0.05
+    invalid["group"]["one_sample"]["inference"]["method"] = "permutation_cluster"
+    with pytest.raises(ValueError, match="method"):
+        validate_config(invalid)
+
+
+def test_fdr_inference_returns_common_result_products(tmp_path: Path) -> None:
+    stat_map = tmp_path / "group_stat-z.nii.gz"
+    data = np.zeros((5, 5, 5), dtype=float)
+    data[2, 2, 2] = 8.0
+    nib.save(nib.Nifti1Image(data, np.eye(4)), stat_map)
+
+    result = create_inference_method({"method": "fdr"}).run(
+        stat_map, tmp_path / "inference", {"method": "fdr", "alpha": 0.05}
+    )
+
+    assert result.stat_map == stat_map
+    assert result.thresholded_map.exists()
+    assert result.significance_mask.exists()
+    assert result.cluster_table.exists()
+    assert result.metadata["method"] == "fdr"
+    assert result.metadata["alpha"] == 0.05
+    assert "computed_threshold" in result.metadata

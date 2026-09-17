@@ -297,6 +297,55 @@ def validate_config(config):
     else:
         raise ValueError("qc_report.reports must be a mapping or list of report names.")
 
+    group = config.get("group", {})
+    if not isinstance(group, dict):
+        raise ValueError("The 'group' configuration must be an object.")
+    one_sample = group.get("one_sample")
+    if one_sample is None:
+        one_sample = {}
+    if not isinstance(one_sample, dict):
+        raise ValueError("group.one_sample must be an object.")
+    if not isinstance(one_sample.get("enabled", False), bool):
+        raise ValueError("group.one_sample.enabled must be a boolean.")
+    if not one_sample:
+        one_sample = {"enabled": False}
+    if not one_sample.get("enabled", False):
+        one_sample = {**one_sample, "enabled": False}
+    else:
+        if "cluster_threshold" in one_sample:
+            raise ValueError(
+                "group.one_sample.cluster_threshold is obsolete; configure group.one_sample.inference."
+            )
+        contrasts = one_sample.get("contrasts", [])
+        if isinstance(contrasts, str):
+            contrasts = [contrasts]
+        if not isinstance(contrasts, list) or not contrasts or not all(
+            isinstance(contrast, str) and contrast.strip() for contrast in contrasts
+        ):
+            raise ValueError("group.one_sample.contrasts must be a non-empty list of names.")
+        if len(set(contrast.strip() for contrast in contrasts)) != len(contrasts):
+            raise ValueError("group.one_sample.contrasts must not contain duplicates.")
+        inference = one_sample.get("inference", {})
+        if not isinstance(inference, dict):
+            raise ValueError("group.one_sample.inference must be an object.")
+        method = str(inference.get("method", "")).strip().lower()
+        if method != "fdr":
+            raise ValueError("group.one_sample.inference.method must be 'fdr'.")
+        try:
+            alpha = float(inference.get("alpha", 0.05))
+        except (TypeError, ValueError):
+            raise ValueError("group.one_sample.inference.alpha must be between 0 and 1.") from None
+        if not 0 < alpha < 1:
+            raise ValueError("group.one_sample.inference.alpha must be between 0 and 1.")
+    if "task" in one_sample and not str(one_sample["task"]).strip():
+        raise ValueError("group.one_sample.task must not be empty when provided.")
+    sessions = one_sample.get("sessions", [])
+    if isinstance(sessions, str):
+        sessions = [sessions]
+    if not isinstance(sessions, list) or not all(
+        isinstance(session, str) and session.strip() for session in sessions
+    ):
+        raise ValueError("group.one_sample.sessions must be a list of non-empty names.")
     subject = analysis.get("subject")
     if not isinstance(subject, dict):
         raise ValueError("analysis.subject must be an object.")

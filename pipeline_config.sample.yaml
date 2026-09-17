@@ -151,6 +151,19 @@ analysis:
 
 group:
   # Group analyses consume existing subject-level derivatives only.
+  one_sample:
+    enabled: false
+    # Optional task filter. If omitted, the requested contrast must resolve to one task.
+    task: nback
+    # Optional session filter. Omit to analyze every discovered session independently.
+    sessions: [BL]
+    contrasts:
+      - 1back_gt_baseline
+      - 2back_gt_baseline
+      - 2back_gt_1back
+    inference:
+      method: fdr
+      alpha: 0.05
   activation:
     enabled: false
     task: nback

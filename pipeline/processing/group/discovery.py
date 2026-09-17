@@ -7,49 +7,56 @@ from typing import Iterable
 import pandas as pd
 
 
-_ENTITY_RE = re.compile(r"(?:^|_)sub-([^_]+)|(?:^|_)ses-([^_]+)")
+_ENTITY_RE = re.compile(
+    r"(?:^|_)sub-([^_]+)|(?:^|_)ses-([^_]+)|(?:^|_)task-([^_]+)"
+)
 
 
 def _bids_component(value: str) -> str:
     return str(value).strip().replace("_", "-").replace(" ", "-")
 
 
-def _entities(path: Path) -> tuple[str | None, str | None]:
+def _entities(path: Path) -> tuple[str | None, str | None, str | None]:
     text = path.name
     subject = None
     session = None
+    task = None
     for match in _ENTITY_RE.finditer(text):
         if match.group(1):
             subject = match.group(1)
         if match.group(2):
             session = match.group(2)
+        if match.group(3):
+            task = match.group(3)
     if subject is None:
         for part in path.parts:
             if part.startswith("sub-"):
                 subject = part[4:]
             elif part.startswith("ses-"):
                 session = part[4:]
-    return subject, session
+    return subject, session, task
 
 
 def discover_effect_maps(
     derivatives_root: str | Path,
     *,
-    task: str,
     contrast: str,
+    task: str | None = None,
 ) -> pd.DataFrame:
     """Discover existing subject-level effect maps for one configured contrast."""
 
     root = Path(derivatives_root)
-    task_component = _bids_component(task)
     contrast_component = _bids_component(contrast)
-    pattern = f"**/*_task-{task_component}*_desc-{contrast_component}_stat-effect.nii.gz"
+    task_pattern = f"_task-{_bids_component(task)}*" if task else "_task-*"
+    pattern = f"**/*{task_pattern}_desc-{contrast_component}_stat-effect.nii.gz"
     records = []
     for path in sorted(root.glob(pattern)):
-        subject, session = _entities(path)
+        subject, session, discovered_task = _entities(path)
         if subject is not None:
-            records.append({"subject": subject, "session": session, "path": path})
-    return pd.DataFrame(records, columns=["subject", "session", "path"])
+            records.append(
+                {"subject": subject, "session": session, "task": discovered_task, "path": path}
+            )
+    return pd.DataFrame(records, columns=["subject", "session", "task", "path"])
 
 
 def discover_atlas_activation_summaries(
@@ -66,7 +73,7 @@ def discover_atlas_activation_summaries(
     pattern = f"**/*_task-{task_component}*_desc-atlas-{atlas_component}-activation.tsv"
     records = []
     for path in sorted(root.glob(pattern)):
-        subject, session = _entities(path)
+        subject, session, _ = _entities(path)
         if subject is not None:
             table = pd.read_csv(path, sep="\t")
             table["subject"] = subject
