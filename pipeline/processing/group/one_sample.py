@@ -54,7 +54,19 @@ def _select_records(
         return records
     selected = records.merge(participants[["subject"]], on="subject", how="inner", validate="many_to_one")
     if decision_manifest is not None:
+        before_decisions = selected.copy()
         selected = select_records(selected, decision_manifest.population)
+        removed = before_decisions.loc[~before_decisions["path"].isin(selected["path"])]
+        print(
+            f"[group] decision population for '{decision_manifest.analysis_id}': "
+            f"{len(selected)}/{len(before_decisions)} maps retained"
+        )
+        for record in removed.itertuples(index=False):
+            print(
+                "[group] excluded map: "
+                f"subject={record.subject} session={record.session or 'n/a'} "
+                f"run={getattr(record, 'run', None) or 'n/a'} path={record.path}"
+            )
     selected["session"] = selected["session"].fillna("n/a").astype(str)
     selected["task"] = selected["task"].fillna("n/a").astype(str)
     sessions = _configured_sessions(specification.get("sessions"))

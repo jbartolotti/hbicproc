@@ -60,4 +60,9 @@ def _decision_manifest(
         raise ValueError(
             f"{field_name}.decision '{decision_id}' is not registered; available decisions: {available}."
         )
-    return decisions[decision_id]
+    manifest = decisions[decision_id]
+    print(
+        f"[group] {field_name} loaded decision manifest '{manifest.analysis_id}' "
+        f"from {manifest.path} (sha256={manifest.content_hash[:12]}...)"
+    )
+    return manifest

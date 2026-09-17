@@ -122,6 +122,39 @@ def test_group_one_sample_resolves_registered_decision(tmp_path: Path, monkeypat
     assert captured["manifest"].population["include"][0]["subject"] == "sub-001"
 
 
+def test_group_decision_logs_manifest_and_removed_maps(tmp_path: Path, capsys) -> None:
+    manifest_path = tmp_path / "primary.yaml"
+    manifest_path.write_text(
+        "schema_version: 1\n"
+        "analysis_id: primary\n"
+        "population:\n"
+        "  exclude:\n"
+        "    - subject: 001\n"
+        "      session: [BL, w12]\n",
+        encoding="utf-8",
+    )
+    config = _apply_defaults(
+        {
+            "decisions": {"primary": str(manifest_path)},
+            "group": {
+                "one_sample": {
+                    "enabled": True,
+                    "decision": "primary",
+                    "contrasts": ["memory"],
+                    "inference": {"method": "fdr", "alpha": 0.05},
+                }
+            },
+        }
+    )
+    validate_config(config)
+    resolved = _resolve_paths(config, tmp_path)
+
+    group_service._decision_manifest(resolved, resolved["group"]["one_sample"], "group.one_sample")
+
+    output = capsys.readouterr().out
+    assert "loaded decision manifest 'primary'" in output
+
+
 def test_decision_manifest_rejects_legacy_parallel_population_fields(tmp_path: Path) -> None:
     manifest_path = tmp_path / "legacy.yaml"
     manifest_path.write_text(
