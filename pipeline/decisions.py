@@ -58,10 +58,15 @@ def load_decision_manifest(
         raise ValueError(f"Decision manifest {manifest_path} must use schema_version 1.")
     _validate_population(data.get("population", {}), manifest_path)
 
+    content_hash = hashlib.sha256(content).hexdigest()
+    print(
+        f"[decisions] loading manifest '{analysis_id}' from {manifest_path} "
+        f"(sha256={content_hash[:12]}...)"
+    )
     return DecisionManifest(
         analysis_id=analysis_id,
         path=manifest_path,
-        content_hash=hashlib.sha256(content).hexdigest(),
+        content_hash=content_hash,
         data=data,
     )
 
