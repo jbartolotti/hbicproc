@@ -10,6 +10,7 @@ from pipeline.processing.group.roi_lmm_model import (
 )
 from pipeline.processing.group.roi_lmm_report import render_roi_lmm_report
 
+from pipeline.processing.group.voxelwise_lme import build_3dlmer_command, build_afni_data_table
 
 def _synthetic_network() -> pd.DataFrame:
     rows = []
@@ -142,4 +143,52 @@ def test_roi_lmm_configuration_requires_analysis_inputs() -> None:
 
     invalid = _apply_defaults({"group": {"roi_lmm": {"enabled": True}}})
     with pytest.raises(ValueError, match="task"):
+        validate_config(invalid)
+
+
+def test_voxelwise_lme_builds_afni_table_and_command(tmp_path) -> None:
+    records = pd.DataFrame([
+        {"subject": "001", "session": "BL", "path": tmp_path / "sub-001_BL.nii.gz"},
+        {"subject": "001", "session": "W12", "path": tmp_path / "sub-001_W12.nii.gz"},
+    ])
+    participants = pd.DataFrame([{"subject": "001", "group": "control"}])
+
+    table = build_afni_data_table(records, participants)
+    command = build_3dlmer_command(
+        output_prefix=tmp_path / "3dLMEr",
+        data_table=tmp_path / "afni_data_table.tsv",
+        mask=tmp_path / "mask.nii.gz",
+    )
+
+    assert list(table.columns) == ["Subj", "Group", "Time", "InputFile"]
+    assert table["Time"].tolist() == ["baseline", "followup"]
+    assert "-model" in command and "Group*Time" in command
+    assert "-ranEff" in command and "~1|Subj" in command
+    assert "-dataTable" in command and "@" in command[command.index("-dataTable") + 1]
+    assert "GroupXTime" in command
+
+
+def test_voxelwise_lme_configuration_is_simple_and_afni_only() -> None:
+    config = _apply_defaults({
+        "group": {
+            "voxelwise_lme": {
+                "enabled": True,
+                "engine": "afni",
+                "contrasts": ["memory"],
+                "mask": {"source": "template_gm", "gm_probability_threshold": 0.2},
+            }
+        }
+    })
+    validate_config(config)
+
+    invalid = _apply_defaults({
+        "group": {
+            "voxelwise_lme": {
+                "enabled": True,
+                "engine": "python",
+                "contrasts": ["memory"],
+            }
+        }
+    })
+    with pytest.raises(ValueError, match="engine"):
         validate_config(invalid)

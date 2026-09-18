@@ -246,6 +246,18 @@ group:
     random_slope_time: true
     fdr_correction: true
     alpha: 0.05
+  voxelwise_lme:
+    enabled: false
+    engine: afni
+    contrasts:
+      - 1back_gt_baseline
+      - 2back_gt_baseline
+      - 2back_gt_1back
+    # Optional task filter. Omit when contrast names are unique across tasks.
+    # task: nback
+    mask:
+      source: template_gm
+      gm_probability_threshold: 0.2
 
 behavior:
   # Behavioral event extraction. Default: disabled.

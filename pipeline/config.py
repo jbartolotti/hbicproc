@@ -151,6 +151,15 @@ def _apply_defaults(config):
                 "source": "",
                 "gm_probability_threshold": 0.2,
                 },
+            "voxelwise_lme": {
+                "enabled": False,
+                "engine": "afni",
+                "contrasts": [],
+                "mask": {
+                    "source": "",
+                    "gm_probability_threshold": 0.2,
+                },
+            },
                 "roi_lmm": {
                     "enabled": False,
                     "task": "",
@@ -398,7 +407,7 @@ def validate_config(config):
         raise ValueError("group.one_sample.task must not be empty when provided.")
     if "decision" in one_sample and not str(one_sample["decision"]).strip():
         raise ValueError("group.one_sample.decision must not be empty when provided.")
-    for analysis_name in ("activation", "dmn", "roi_lmm"):
+    for analysis_name in ("activation", "dmn", "roi_lmm", "voxelwise_lme"):
         analysis_specification = group.get(analysis_name, {})
         if isinstance(analysis_specification, dict) and "decision" in analysis_specification:
             if not str(analysis_specification["decision"]).strip():
@@ -436,6 +445,35 @@ def validate_config(config):
             raise ValueError("group.roi_lmm.alpha must be between 0 and 1.") from None
         if not 0 < alpha < 1:
             raise ValueError("group.roi_lmm.alpha must be between 0 and 1.")
+    voxelwise_lme = group.get("voxelwise_lme", {})
+    if not isinstance(voxelwise_lme, dict):
+        raise ValueError("group.voxelwise_lme must be an object.")
+    if not isinstance(voxelwise_lme.get("enabled", False), bool):
+        raise ValueError("group.voxelwise_lme.enabled must be a boolean.")
+    if voxelwise_lme.get("enabled", False):
+        if str(voxelwise_lme.get("engine", "afni")).strip().lower() != "afni":
+            raise ValueError("group.voxelwise_lme.engine must be 'afni'.")
+        contrasts = voxelwise_lme.get("contrasts", [])
+        if isinstance(contrasts, str):
+            contrasts = [contrasts]
+        if not isinstance(contrasts, list) or not contrasts or not all(
+            isinstance(contrast, str) and contrast.strip() for contrast in contrasts
+        ):
+            raise ValueError("group.voxelwise_lme.contrasts must be a non-empty list of names.")
+        if len({contrast.strip() for contrast in contrasts}) != len(contrasts):
+            raise ValueError("group.voxelwise_lme.contrasts must not contain duplicates.")
+        voxelwise_mask = voxelwise_lme.get("mask", {})
+        if not isinstance(voxelwise_mask, dict):
+            raise ValueError("group.voxelwise_lme.mask must be an object.")
+        voxelwise_mask_source = str(voxelwise_mask.get("source", "")).strip().lower()
+        if voxelwise_mask_source not in {"", "template_gm"}:
+            raise ValueError("group.voxelwise_lme.mask.source must be empty or 'template_gm'.")
+        try:
+            voxelwise_threshold = float(voxelwise_mask.get("gm_probability_threshold", 0.2))
+        except (TypeError, ValueError):
+            raise ValueError("group.voxelwise_lme.mask.gm_probability_threshold must be between 0 and 1.") from None
+        if not 0 <= voxelwise_threshold <= 1:
+            raise ValueError("group.voxelwise_lme.mask.gm_probability_threshold must be between 0 and 1.")
     sessions = one_sample.get("sessions", [])
     if isinstance(sessions, str):
         sessions = [sessions]

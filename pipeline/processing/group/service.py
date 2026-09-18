@@ -9,6 +9,7 @@ from .dmn import run_dmn
 from .masks import get_group_mask
 from .one_sample import run_one_sample
 from .roi_lmm import run_roi_lmm
+from .voxelwise_lme import run_voxelwise_lme
 from ...decisions import load_configured_decisions
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,14 @@ def run(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
             config,
             roi_lmm,
             decision_manifest=_decision_manifest(config, roi_lmm, "group.roi_lmm"),
+        )
+    voxelwise_lme = group.get("voxelwise_lme", {})
+    if isinstance(voxelwise_lme, dict) and voxelwise_lme.get("enabled", False):
+        results["voxelwise_lme"] = run_voxelwise_lme(
+            config,
+            voxelwise_lme,
+            decision_manifest=_decision_manifest(config, voxelwise_lme, "group.voxelwise_lme"),
+            dry_run=dry_run,
         )
     return {
         "success": True,
