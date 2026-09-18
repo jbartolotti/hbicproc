@@ -31,7 +31,7 @@ def test_setup_logging_separates_pipeline_and_dependency_levels() -> None:
             if getattr(handler, "_hbicproc_console", False)
         ]
         assert console_handlers
-        assert all(handler.level == logging.WARNING for handler in console_handlers)
+        assert all(handler.level == logging.NOTSET for handler in console_handlers)
     finally:
         root_logger.setLevel(original_root_level)
         pipeline_logger.setLevel(original_pipeline_level)

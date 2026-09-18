@@ -28,7 +28,9 @@ def setup_logging(level: str, dependency_level: str = "INFO"):
         console_handler = logging.StreamHandler()
         console_handler._hbicproc_console = True
         root_logger.addHandler(console_handler)
-    console_handler.setLevel(dependency_numeric_level)
+    # The root logger filters dependency records; the handler must still accept
+    # lower-level records propagated from the explicitly configured pipeline logger.
+    console_handler.setLevel(logging.NOTSET)
     console_handler.setFormatter(
         logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     )
