@@ -45,6 +45,9 @@ def _apply_defaults(config):
         "code_dir": "code",
         "email": "",
         "log_dir": "",
+        "logging": {
+            "level": "INFO"
+        },
         "decisions": {},
         "tokens": {
             "anat": ["mprage", "t1", "t2", "anat", "mpr", "sag", "t1w", "t2w"],
@@ -186,6 +189,14 @@ def _normalize_analysis_configuration(analysis):
 
 def validate_config(config):
     """Validate the authoritative JSON configuration schema."""
+
+    logging_config = config.get("logging", {})
+    if not isinstance(logging_config, dict):
+        raise ValueError("The 'logging' configuration must be an object.")
+    logging_level = str(logging_config.get("level", "INFO")).strip().upper()
+    if logging_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+        raise ValueError("logging.level must be one of: DEBUG, INFO, WARNING, ERROR.")
+    logging_config["level"] = logging_level
 
     analysis = config.get("analysis")
     if not isinstance(analysis, dict):

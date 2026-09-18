@@ -7,6 +7,9 @@ code_dir: code                 # Study-specific scripts and behavior configurati
 email: ""                     # Optional notification email. Default: empty.
 log_dir: ""                   # Log directory. Empty uses <study_root>/logs.
 
+logging:
+  level: INFO                 # Console logging level: DEBUG, INFO, WARNING, or ERROR.
+
 decisions:
   # Investigator-authored analysis decision manifests. Paths are relative to this file.
   # primary_nback: code/decisions/primary_nback.yaml

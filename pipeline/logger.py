@@ -1,6 +1,31 @@
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
+
+
+def setup_logging(level: str):
+    """Configure the process-wide console logger once."""
+
+    level_name = str(level).strip().upper()
+    numeric_level = getattr(logging, level_name, None)
+    if not isinstance(numeric_level, int) or level_name not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+        raise ValueError("Logging level must be one of: DEBUG, INFO, WARNING, ERROR.")
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(numeric_level)
+    console_handler = next(
+        (handler for handler in root_logger.handlers if getattr(handler, "_hbicproc_console", False)),
+        None,
+    )
+    if console_handler is None:
+        console_handler = logging.StreamHandler()
+        console_handler._hbicproc_console = True
+        root_logger.addHandler(console_handler)
+    console_handler.setLevel(numeric_level)
+    console_handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    )
 
 
 def get_log_paths(config, subject=None):

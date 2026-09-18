@@ -7,9 +7,11 @@ from .config import load_config, save_default_config
 from .runner import PipelineRunner
 from .stages import STAGE_CLASSES
 from .state import load_subject_state, save_subject_state
-from .logger import append_event
+from .logger import append_event, setup_logging
 from .status import save_pipeline_status_figure
 from .core.paths import list_subjects, write_json, load_json
+
+logger = logging.getLogger(__name__)
 
 
 def _print_result(result):
@@ -281,12 +283,6 @@ def _build_parser():
 
 
 def main(argv=None):
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        force=True,
-    )
-
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -295,6 +291,9 @@ def main(argv=None):
         return 0
 
     config = _load_config(args.config)
+    setup_logging(config["logging"]["level"])
+    logger.info("HBICPROC started")
+    logger.info(f"Logging level: {config['logging']['level']}")
 
     if args.command in STAGE_CLASSES:
         return _handle_stage(parser, args, config)
