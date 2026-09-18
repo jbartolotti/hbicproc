@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from typing import Any
 
 import numpy as np
@@ -30,6 +31,7 @@ def fit_network_lmm(
     data: pd.DataFrame,
     *,
     random_slope_time: bool = True,
+    network_name: str = "unknown",
 ) -> dict[str, Any]:
     """Fit ``effect ~ group * time + (1 + time | subject)`` for one network."""
 
@@ -42,14 +44,28 @@ def fit_network_lmm(
         raise ValueError("A network model requires at least two subjects.")
 
     formula = "effect ~ group_code * time_code"
+    fit_warning = ""
+    random_slope_diagnostic = ""
+    random_intercept_diagnostic = ""
+    cov_re_summary: dict[str, Any] = {}
     fit = None
     specification = "random_intercept"
     fallback_reason = ""
     if random_slope_time:
         try:
-            candidate = smf.mixedlm(
-                formula, coded, groups=coded["subject"], re_formula="~time_code"
-            ).fit(reml=False, method="lbfgs", disp=False)
+            candidate, slope_warnings = _fit_model(
+                smf.mixedlm(formula, coded, groups=coded["subject"], re_formula="~time_code"),
+                model_type="random_slope_time",
+            )
+            fit_warning = slope_warnings
+            slope_diagnostics = _log_fit_diagnostics(
+                candidate,
+                network_name=network_name,
+                model_type="random_slope_time",
+                n_observations=len(coded),
+                n_subjects=coded["subject"].nunique(),
+            )
+            cov_re_summary = slope_diagnostics["cov_re_summary"]
             if not bool(getattr(candidate, "converged", False)):
                 raise ValueError("random-slope model did not converge")
             diagnostic = _random_slope_diagnostic(candidate)
@@ -59,16 +75,63 @@ def fit_network_lmm(
             specification = "random_slope_time"
         except Exception as exc:  # statsmodels raises several fit-specific exception types.
             fallback_reason = str(exc)
+            random_slope_diagnostic = fallback_reason
             logger.warning(
-                "Rejecting random-slope ROI LMM and refitting random-intercept model: %s",
+                "Network '%s': rejecting random-slope ROI LMM and refitting random-intercept model: %s",
+                network_name,
                 fallback_reason,
             )
     if fit is None:
-        fit = smf.mixedlm(
-            formula, coded, groups=coded["subject"], re_formula="1"
-        ).fit(reml=False, method="lbfgs", disp=False)
-        if random_slope_time:
-            specification = "random_intercept_fallback"
+        try:
+            fit, intercept_warnings = _fit_model(
+                smf.mixedlm(formula, coded, groups=coded["subject"], re_formula="1"),
+                model_type="random_intercept",
+            )
+            fit_warning = "; ".join(filter(None, [fit_warning, intercept_warnings]))
+        except Exception as exc:
+            random_intercept_diagnostic = str(exc)
+            fallback_reason = "; ".join(
+                filter(
+                    None,
+                    [
+                        fallback_reason,
+                        f"random-intercept model failed: {random_intercept_diagnostic}",
+                    ],
+                )
+            )
+            logger.warning(
+                "Network '%s': random-intercept ROI LMM failed after diagnostics: %s",
+                network_name,
+                random_intercept_diagnostic,
+            )
+            fit, ols_warnings = _fit_model(
+                smf.ols(formula, data=coded),
+                model_type="ols",
+            )
+            fit_warning = "; ".join(filter(None, [fit_warning, ols_warnings]))
+            specification = "ols_fallback"
+            cov_re_summary = {}
+        else:
+            intercept_diagnostics = _log_fit_diagnostics(
+                fit,
+                network_name=network_name,
+                model_type="random_intercept",
+                n_observations=len(coded),
+                n_subjects=coded["subject"].nunique(),
+            )
+            cov_re_summary = intercept_diagnostics["cov_re_summary"]
+            random_intercept_diagnostic = _random_intercept_diagnostic(fit) or ""
+            if random_slope_time:
+                specification = "random_intercept_fallback"
+
+    if specification == "ols_fallback":
+        _log_fit_diagnostics(
+            fit,
+            network_name=network_name,
+            model_type="ols",
+            n_observations=len(coded),
+            n_subjects=coded["subject"].nunique(),
+        )
 
     fixed_effects = _fixed_effects(fit)
     emmeans = _estimated_marginal_means(fit)
@@ -82,7 +145,12 @@ def fit_network_lmm(
         "time_coding": TIME_CODES,
         "random_effects": specification,
         "fallback_reason": fallback_reason,
-        "converged": bool(getattr(fit, "converged", False)),
+        "random_slope_diagnostic": random_slope_diagnostic,
+        "random_intercept_diagnostic": random_intercept_diagnostic,
+        "model_type": specification,
+        "cov_re_summary": cov_re_summary,
+        "fit_warning": fit_warning,
+        "converged": bool(getattr(fit, "converged", True)),
         "fixed_effects": fixed_effects,
         "interaction": interaction,
         "emmeans": emmeans,
@@ -107,11 +175,13 @@ def apply_interaction_fdr(results: list[dict[str, Any]], alpha: float = 0.05) ->
 
 
 def _fixed_effects(fit: Any) -> dict[str, dict[str, float | None]]:
-    names = list(fit.fe_params.index)
+    parameters = _fixed_parameters(fit)
+    names = list(parameters.index)
+    standard_errors = getattr(fit, "bse_fe", getattr(fit, "bse", None))
     effects = {}
     for name in names:
-        estimate = float(fit.fe_params[name])
-        standard_error = float(fit.bse_fe[name])
+        estimate = float(parameters[name])
+        standard_error = float(standard_errors[name])
         effects[name] = {
             "estimate": estimate,
             "std_error": standard_error,
@@ -144,15 +214,114 @@ def _random_slope_diagnostic(fit: Any) -> str | None:
     return None
 
 
+def _log_fit_diagnostics(
+    fit: Any,
+    *,
+    network_name: str,
+    model_type: str,
+    n_observations: int,
+    n_subjects: int,
+) -> dict[str, Any]:
+    """Log and serialize diagnostics for a completed statsmodels fit."""
+
+    random_covariance = getattr(fit, "cov_re", None)
+    covariance = np.asarray(random_covariance, dtype=float) if random_covariance is not None else np.array([])
+    eigenvalues = np.linalg.eigvalsh(covariance) if covariance.ndim == 2 else np.array([])
+    variances = np.diag(covariance).tolist() if covariance.ndim == 2 else []
+    minimum_eigenvalue = float(np.min(eigenvalues)) if eigenvalues.size else None
+    singularity_diagnostic = ""
+    if minimum_eigenvalue is not None:
+        scale = max(1.0, float(np.max(np.abs(eigenvalues))))
+        if minimum_eigenvalue <= 1e-8 * scale:
+            singularity_diagnostic = "covariance singular or near-singular"
+    if variances and variances[0] <= 1e-8 * max(1.0, float(getattr(fit, "scale", 1.0))):
+        singularity_diagnostic = "; ".join(
+            filter(None, [singularity_diagnostic, "first random-effect variance effectively zero"])
+        )
+    summary = {
+        "matrix": covariance.tolist(),
+        "variance_estimates": variances,
+        "minimum_eigenvalue": minimum_eigenvalue,
+        "residual_variance": float(getattr(fit, "scale", np.nan)),
+        "singularity_diagnostic": singularity_diagnostic,
+    }
+    logger.debug(
+        "ROI LMM diagnostics: network=%s model=%s observations=%d subjects=%d "
+        "converged=%s cov_re=%s variance_estimates=%s residual_variance=%s "
+        "minimum_eigenvalue=%s fixed_effects=%s",
+        network_name,
+        model_type,
+        n_observations,
+        n_subjects,
+        bool(getattr(fit, "converged", False)),
+        covariance.tolist(),
+        variances,
+        getattr(fit, "scale", None),
+        minimum_eigenvalue,
+        {name: float(value) for name, value in _fixed_parameters(fit).items()},
+    )
+    if singularity_diagnostic:
+        logger.debug(
+            "ROI LMM singularity diagnostics: network=%s model=%s reason=%s",
+            network_name,
+            model_type,
+            singularity_diagnostic,
+        )
+    return {"cov_re_summary": summary}
+
+
+def _fit_model(model: Any, *, model_type: str) -> tuple[Any, str]:
+    """Fit without hiding warnings; return their text for report diagnostics."""
+
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        if model_type == "ols":
+            fit = model.fit()
+        else:
+            fit = model.fit(reml=False, method="lbfgs", disp=False)
+    messages = []
+    for warning in captured:
+        warnings.warn(warning.message, warning.category, stacklevel=2)
+        messages.append(str(warning.message))
+    return fit, "; ".join(dict.fromkeys(messages))
+
+
+def _fixed_parameters(fit: Any) -> Any:
+    return getattr(fit, "fe_params", getattr(fit, "params"))
+
+
+def _random_intercept_diagnostic(fit: Any) -> str | None:
+    summary = _log_covariance_summary(fit)
+    minimum_eigenvalue = summary["minimum_eigenvalue"]
+    variances = summary["variance_estimates"]
+    if minimum_eigenvalue is not None and minimum_eigenvalue <= 1e-8:
+        return "random-intercept covariance is singular or near-singular"
+    if variances and variances[0] <= 1e-8 * max(1.0, summary["residual_variance"]):
+        return "subject random-intercept variance is effectively zero"
+    return None
+
+
+def _log_covariance_summary(fit: Any) -> dict[str, Any]:
+    random_covariance = getattr(fit, "cov_re", None)
+    covariance = np.asarray(random_covariance, dtype=float) if random_covariance is not None else np.array([])
+    eigenvalues = np.linalg.eigvalsh(covariance) if covariance.ndim == 2 else np.array([])
+    return {
+        "variance_estimates": np.diag(covariance).tolist() if covariance.ndim == 2 else [],
+        "minimum_eigenvalue": float(np.min(eigenvalues)) if eigenvalues.size else None,
+        "residual_variance": float(getattr(fit, "scale", np.nan)),
+    }
+
+
 def _estimated_marginal_means(fit: Any) -> list[dict[str, float | str]]:
-    names = list(fit.fe_params.index)
+    parameters = _fixed_parameters(fit)
+    names = list(parameters.index)
     covariance = fit.cov_params().loc[names, names].to_numpy()
     rows = []
     for group, group_code in GROUP_CODES.items():
         for time, time_code in TIME_CODES.items():
             vector = np.array([1.0, group_code, time_code, group_code * time_code])
             vector = vector[: len(names)]
-            estimate = float(vector @ fit.fe_params.to_numpy())
+            estimate = float(vector @ parameters.to_numpy())
             standard_error = float(np.sqrt(max(vector @ covariance @ vector, 0.0)))
             rows.append({
                 "group": group,

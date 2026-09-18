@@ -1,5 +1,6 @@
 import pandas as pd
 import pytest
+from pathlib import Path
 
 from pipeline.config import _apply_defaults, validate_config
 from pipeline.processing.group.roi_lmm_model import (
@@ -7,6 +8,7 @@ from pipeline.processing.group.roi_lmm_model import (
     code_factors,
     fit_network_lmm,
 )
+from pipeline.processing.group.roi_lmm_report import render_roi_lmm_report
 
 
 def _synthetic_network() -> pd.DataFrame:
@@ -36,8 +38,11 @@ def test_code_factors_uses_centered_half_coding() -> None:
     assert coded["time_code"].tolist() == [-0.5, 0.5]
 
 
-def test_network_lmm_returns_emmeans_and_difference_in_differences() -> None:
-    result = fit_network_lmm(_synthetic_network(), random_slope_time=False)
+def test_network_lmm_returns_diagnostics_and_difference_in_differences(caplog) -> None:
+    with caplog.at_level("DEBUG"):
+        result = fit_network_lmm(
+            _synthetic_network(), random_slope_time=False, network_name="Default"
+        )
 
     assert result["random_effects"] == "random_intercept"
     assert len(result["emmeans"]) == 4
@@ -46,6 +51,12 @@ def test_network_lmm_returns_emmeans_and_difference_in_differences() -> None:
     assert {
         "estimate", "std_error", "statistic", "p_value", "lower_ci", "upper_ci"
     }.issubset(result["fixed_effects"]["group_code"])
+    assert result["model_type"] == "random_intercept"
+    assert result["cov_re_summary"]["matrix"]
+    assert "residual_variance" in result["cov_re_summary"]
+    assert "minimum_eigenvalue" in result["cov_re_summary"]
+    assert any("network=Default" in record.message for record in caplog.records)
+    assert any("cov_re=" in record.message for record in caplog.records)
 
 
 def test_interaction_fdr_is_applied_across_networks() -> None:
@@ -59,6 +70,51 @@ def test_interaction_fdr_is_applied_across_networks() -> None:
     assert results[0]["interaction"]["fdr_q_value"] < 0.01
     assert results[0]["interaction"]["fdr_significant"] is True
     assert results[1]["interaction"]["fdr_q_value"] > 0.1
+
+
+def test_network_lmm_uses_ols_when_both_mixed_models_fail(monkeypatch) -> None:
+    def fail_mixed_model(*args, **kwargs):
+        raise np.linalg.LinAlgError("Singular matrix")
+
+    import numpy as np
+
+    monkeypatch.setattr(
+        "pipeline.processing.group.roi_lmm_model.smf.mixedlm", fail_mixed_model
+    )
+
+    result = fit_network_lmm(_synthetic_network(), network_name="Default")
+
+    assert result["model_type"] == "ols_fallback"
+    assert result["random_intercept_diagnostic"] == "Singular matrix"
+    assert "random-intercept model failed: Singular matrix" in result["fallback_reason"]
+    assert result["fixed_effects"]["group_code:time_code"]["p_value"] < 0.05
+
+
+def test_roi_lmm_report_includes_model_diagnostics_and_wald_note(tmp_path: Path) -> None:
+    network = fit_network_lmm(_synthetic_network(), random_slope_time=False, network_name="Default")
+    network["network"] = "Default"
+    plot_path = tmp_path / "default.png"
+    plot_path.write_bytes(b"png")
+    network["plot"] = str(plot_path)
+    report = render_roi_lmm_report(
+        {
+            "contrast": "memory",
+            "atlas": "schaefer200",
+            "n_subjects": network["n_subjects"],
+            "n_networks": 1,
+            "model_formula": network["model_formula"],
+            "group_coding": network["group_coding"],
+            "time_coding": network["time_coding"],
+            "networks": [network],
+        },
+        tmp_path / "report.html",
+    )
+
+    content = report.read_text(encoding="utf-8")
+    assert "Wald tests from statsmodels MixedLM" in content
+    assert "Model Diagnostics" in content
+    assert "95% CI Lower" in content
+    assert "default.png" in content
 
 
 def test_roi_lmm_configuration_requires_analysis_inputs() -> None:

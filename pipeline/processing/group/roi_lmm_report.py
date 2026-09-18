@@ -19,7 +19,8 @@ def render_roi_lmm_report(result: dict[str, Any], output_path: str | Path) -> Pa
         network_rows.append({
             "network": network["network"],
             "n_subjects": network["n_subjects"],
-            "random_effects": network["random_effects"],
+            "model_type": network.get("model_type", network["random_effects"]),
+            "converged": network.get("converged", False),
             "estimate": interaction.get("estimate"),
             "t": interaction.get("statistic"),
             "p_value": interaction.get("p_value"),
@@ -55,10 +56,33 @@ def render_roi_lmm_report(result: dict[str, Any], output_path: str | Path) -> Pa
         )
         network_sections.append(
             f"<section><h2>{html.escape(network['network'])}</h2>"
+            "<h3>Model Diagnostics</h3>"
+            f"<p>Model type: <code>{html.escape(network.get('model_type', network['random_effects']))}</code>; "
+            f"converged: {html.escape(str(network.get('converged', False)))}</p>"
             f"<p>Random-effects specification: <code>{html.escape(network['random_effects'])}</code>"
             + (
                 f"; fallback reason: {html.escape(network['fallback_reason'])}"
                 if network.get("fallback_reason")
+                else ""
+            )
+            + (
+                f"</p><p>Random-slope diagnostic: {html.escape(network['random_slope_diagnostic'])}"
+                if network.get("random_slope_diagnostic")
+                else ""
+            )
+            + (
+                f"</p><p>Random-intercept diagnostic: {html.escape(network['random_intercept_diagnostic'])}"
+                if network.get("random_intercept_diagnostic")
+                else ""
+            )
+            + (
+                f"</p><p>Fit warning: {html.escape(network['fit_warning'])}"
+                if network.get("fit_warning")
+                else ""
+            )
+            + (
+                f"</p><p>Random-effects covariance summary: <code>{html.escape(str(network['cov_re_summary']))}</code>"
+                if network.get("cov_re_summary")
                 else ""
             )
             + "</p><h3>Fixed Effects</h3>"

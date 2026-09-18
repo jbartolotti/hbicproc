@@ -67,6 +67,7 @@ def run_roi_lmm(
                 fitted = fit_network_lmm(
                     frame[["subject", "group", "time", "effect"]],
                     random_slope_time=bool(specification.get("random_slope_time", True)),
+                    network_name=str(network),
                 )
             except (ValueError, RuntimeError) as exc:
                 logger.warning("Skipping network '%s' for contrast '%s': %s", network, contrast, exc)
