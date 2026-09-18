@@ -44,6 +44,36 @@ def fit_network_lmm(
         raise ValueError("A network model requires at least two subjects.")
 
     formula = "effect ~ group_code * time_code"
+    intercept_model = None
+    explicit_intercept_model = None
+    for model_label, re_formula in (
+        ("random_intercept_default", None),
+        ("random_intercept_re_formula_1", "1"),
+    ):
+        try:
+            model_kwargs = {"groups": coded["subject"]}
+            if re_formula is not None:
+                model_kwargs["re_formula"] = re_formula
+            model = smf.mixedlm(formula, coded, **model_kwargs)
+        except Exception as exc:
+            logger.debug(
+                "ROI LMM model structure construction failed: network=%s model=%s reason=%s",
+                network_name,
+                model_label,
+                exc,
+            )
+            continue
+        _log_model_structure(
+            model,
+            network_name=network_name,
+            model_label=model_label,
+            n_observations=len(coded),
+            n_subjects=coded["subject"].nunique(),
+        )
+        if re_formula is None:
+            intercept_model = model
+        else:
+            explicit_intercept_model = model
     fit_warning = ""
     random_slope_diagnostic = ""
     random_intercept_diagnostic = ""
@@ -83,8 +113,12 @@ def fit_network_lmm(
             )
     if fit is None:
         try:
+            if explicit_intercept_model is None:
+                explicit_intercept_model = smf.mixedlm(
+                    formula, coded, groups=coded["subject"], re_formula="1"
+                )
             fit, intercept_warnings = _fit_model(
-                smf.mixedlm(formula, coded, groups=coded["subject"], re_formula="1"),
+                explicit_intercept_model,
                 model_type="random_intercept",
             )
             fit_warning = "; ".join(filter(None, [fit_warning, intercept_warnings]))
@@ -268,6 +302,37 @@ def _log_fit_diagnostics(
             singularity_diagnostic,
         )
     return {"cov_re_summary": summary}
+
+
+def _log_model_structure(
+    model: Any,
+    *,
+    network_name: str,
+    model_label: str,
+    n_observations: int,
+    n_subjects: int,
+) -> None:
+    """Log the design structures used by each random-intercept construction."""
+
+    exog = np.asarray(model.exog)
+    exog_re = np.asarray(model.exog_re) if model.exog_re is not None else np.empty((0, 0))
+    fixed_rank = int(np.linalg.matrix_rank(exog)) if exog.size else 0
+    condition_number = float(np.linalg.cond(exog)) if exog.size else None
+    random_condition_number = float(np.linalg.cond(exog_re)) if exog_re.size else None
+    logger.debug(
+        "ROI LMM model structure: network=%s model=%s exog_shape=%s "
+        "exog_re_shape=%s fixed_effect_rank=%d condition_number=%s "
+        "random_effect_condition_number=%s subjects=%d observations=%d",
+        network_name,
+        model_label,
+        exog.shape,
+        exog_re.shape,
+        fixed_rank,
+        condition_number,
+        random_condition_number,
+        n_subjects,
+        n_observations,
+    )
 
 
 def _fit_model(model: Any, *, model_type: str) -> tuple[Any, str]:

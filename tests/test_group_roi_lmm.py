@@ -57,6 +57,15 @@ def test_network_lmm_returns_diagnostics_and_difference_in_differences(caplog) -
     assert "minimum_eigenvalue" in result["cov_re_summary"]
     assert any("network=Default" in record.message for record in caplog.records)
     assert any("cov_re=" in record.message for record in caplog.records)
+    structure_logs = [
+        record.message for record in caplog.records if "ROI LMM model structure" in record.message
+    ]
+    assert any("model=random_intercept_default" in message for message in structure_logs)
+    assert any("model=random_intercept_re_formula_1" in message for message in structure_logs)
+    assert all("exog_shape=" in message for message in structure_logs)
+    assert all("exog_re_shape=" in message for message in structure_logs)
+    assert all("fixed_effect_rank=" in message for message in structure_logs)
+    assert all("condition_number=" in message for message in structure_logs)
 
 
 def test_interaction_fdr_is_applied_across_networks() -> None:
