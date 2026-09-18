@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 import logging
 
@@ -21,7 +22,7 @@ def run(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
         return {"success": True, "skipped": False, "message": "Group analysis dry run.", "details": group}
 
     results = {}
-    group_mask = get_group_mask(config)
+    group_mask = get_group_mask(config, _reference_image(config))
     one_sample = group.get("one_sample", {})
     logger.info("checking one_sample for decision manifest")
     if isinstance(one_sample, dict) and one_sample.get("enabled", False):
@@ -52,6 +53,19 @@ def run(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
         "message": "Group analyses completed." if results else "No group analyses are enabled.",
         "details": results,
     }
+
+
+def _reference_image(config: dict[str, Any]) -> str | None:
+    """Find the first subject-level effect map for the shared mask grid."""
+
+    output_dir = config.get("analysis", {}).get("output_dir")
+    if not output_dir:
+        return None
+    root = Path(output_dir)
+    for path in sorted(root.rglob("*_stat-effect.nii.gz")):
+        if "group" not in path.relative_to(root).parts:
+            return str(path)
+    return None
 
 
 def _decision_manifest(

@@ -31,6 +31,11 @@ def test_template_gm_mask_is_thresholded_and_cached(tmp_path: Path, monkeypatch)
         probability_path,
     )
     fetch_calls = []
+    reference_path = tmp_path / "reference.nii.gz"
+    nib.save(
+        nib.Nifti1Image(np.zeros((1, 2, 2), dtype=float), np.eye(4)),
+        reference_path,
+    )
 
     class Fetched:
         gm = str(probability_path)
@@ -50,11 +55,13 @@ def test_template_gm_mask_is_thresholded_and_cached(tmp_path: Path, monkeypatch)
         }
     }
 
-    first = masks.get_group_mask(config)
-    second = masks.get_group_mask(config)
+    first = masks.get_group_mask(config, reference_path)
+    second = masks.get_group_mask(config, reference_path)
 
     assert fetch_calls[0]["data_dir"] == str(tmp_path / "cache")
     assert len(fetch_calls) == 1
+    assert first.shape == (1, 2, 2)
+    assert np.allclose(first.affine, np.eye(4))
     assert np.array_equal(first.get_fdata(), second.get_fdata())
     assert np.array_equal(first.get_fdata(), np.array([[[0, 1], [1, 0]]], dtype=float))
     assert set(np.unique(first.get_fdata())) == {0.0, 1.0}
