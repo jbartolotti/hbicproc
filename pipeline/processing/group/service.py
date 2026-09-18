@@ -5,6 +5,7 @@ import logging
 
 from .activation import run_activation
 from .dmn import run_dmn
+from .masks import get_group_mask
 from .one_sample import run_one_sample
 from ...decisions import load_configured_decisions
 
@@ -20,23 +21,24 @@ def run(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
         return {"success": True, "skipped": False, "message": "Group analysis dry run.", "details": group}
 
     results = {}
+    group_mask = get_group_mask(config)
     one_sample = group.get("one_sample", {})
     logger.info("checking one_sample for decision manifest")
     if isinstance(one_sample, dict) and one_sample.get("enabled", False):
         logger.info("loading manifest")
         decision_manifest = _decision_manifest(config, one_sample, "group.one_sample")
-        results["one_sample"] = run_one_sample(
-            config,
-            one_sample,
-            decision_manifest=decision_manifest,
-        )
+        one_sample_kwargs = {"decision_manifest": decision_manifest}
+        if group_mask is not None:
+            one_sample_kwargs["mask_img"] = group_mask
+        results["one_sample"] = run_one_sample(config, one_sample, **one_sample_kwargs)
     activation = group.get("activation", {})
     if isinstance(activation, dict) and activation.get("enabled", False):
-        results["activation"] = run_activation(
-            config,
-            activation,
-            decision_manifest=_decision_manifest(config, activation, "group.activation"),
-        )
+        activation_kwargs = {
+            "decision_manifest": _decision_manifest(config, activation, "group.activation")
+        }
+        if group_mask is not None:
+            activation_kwargs["mask_img"] = group_mask
+        results["activation"] = run_activation(config, activation, **activation_kwargs)
     dmn = group.get("dmn", {})
     if isinstance(dmn, dict) and dmn.get("enabled", False):
         results["dmn"] = run_dmn(

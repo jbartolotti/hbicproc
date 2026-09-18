@@ -158,6 +158,10 @@ analysis:
 
 group:
   # Group analyses consume existing subject-level derivatives only.
+  mask:
+    # Optional shared mask provider. Empty preserves Nilearn's model default.
+    source: ""             # Set to template_gm to use Nilearn's MNI GM template.
+    gm_probability_threshold: 0.2
   one_sample:
     enabled: false
     # Optional registered investigator decision manifest for population selection.

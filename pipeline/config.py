@@ -145,7 +145,12 @@ def _apply_defaults(config):
                 }
             }
         },
-        "group": {}
+        "group": {
+            "mask": {
+                "source": "",
+                "gm_probability_threshold": 0.2,
+            }
+        }
     }
 
     merged = _deep_merge(defaults, config)
@@ -321,6 +326,20 @@ def validate_config(config):
     group = config.get("group", {})
     if not isinstance(group, dict):
         raise ValueError("The 'group' configuration must be an object.")
+    mask = group.get("mask", {})
+    if not isinstance(mask, dict):
+        raise ValueError("group.mask must be an object.")
+    mask_source = str(mask.get("source", "")).strip().lower()
+    if mask_source not in {"", "template_gm"}:
+        raise ValueError("group.mask.source must be empty or 'template_gm'.")
+    try:
+        gm_threshold = float(mask.get("gm_probability_threshold", 0.2))
+    except (TypeError, ValueError):
+        raise ValueError("group.mask.gm_probability_threshold must be between 0 and 1.") from None
+    if not 0 <= gm_threshold <= 1:
+        raise ValueError("group.mask.gm_probability_threshold must be between 0 and 1.")
+    mask["source"] = mask_source
+    mask["gm_probability_threshold"] = gm_threshold
     one_sample = group.get("one_sample")
     if one_sample is None:
         one_sample = {}

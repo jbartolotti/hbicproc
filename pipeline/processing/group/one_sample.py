@@ -192,6 +192,7 @@ def run_one_sample(
     specification: dict[str, Any],
     *,
     decision_manifest: DecisionManifest | None = None,
+    mask_img: Any | None = None,
 ) -> dict[str, Any]:
     analysis_root = Path(config["analysis"]["output_dir"])
     bids_root = Path(config.get("bids_root") or config.get("study_root", "."))
@@ -217,7 +218,11 @@ def run_one_sample(
             design = pd.DataFrame({"intercept": 1.0}, index=session_records.index)
             design.to_csv(output_dir / "design_matrix.tsv", sep="\t", index=False)
             logger.info("Fitting one-sample group model: contrast=%s session=%s subjects=%d", contrast, session, session_records["subject"].nunique())
-            model = SecondLevelModel(smoothing_fwhm=None, minimize_memory=False)
+            model = SecondLevelModel(
+                smoothing_fwhm=None,
+                minimize_memory=False,
+                mask_img=mask_img,
+            )
             model.fit(session_records["path"].tolist(), design_matrix=design)
             effect = model.compute_contrast([1.0], output_type="effect_size")
             z_score = model.compute_contrast([1.0], output_type="z_score")

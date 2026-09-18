@@ -47,6 +47,7 @@ def run_activation(
     specification: dict[str, Any],
     *,
     decision_manifest: DecisionManifest | None = None,
+    mask_img: Any | None = None,
 ) -> dict[str, Any]:
     analysis = config["analysis"]
     derivatives_root = Path(analysis["output_dir"])
@@ -76,7 +77,11 @@ def run_activation(
         if len(records) < 4:
             raise ValueError(f"Insufficient observations for group contrast '{contrast_name}'.")
 
-        model = SecondLevelModel(smoothing_fwhm=None, minimize_memory=False)
+        model = SecondLevelModel(
+            smoothing_fwhm=None,
+            minimize_memory=False,
+            mask_img=mask_img,
+        )
         model.fit(records["path"].tolist(), design_matrix=design)
         output_dir = derivatives_root / "group" / "activation" / _component(contrast_name)
         output_dir.mkdir(parents=True, exist_ok=True)
