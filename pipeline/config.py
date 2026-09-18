@@ -166,6 +166,7 @@ def _apply_defaults(config):
                     "atlas": "",
                     "contrasts": [],
                     "aggregation": "networks",
+                    "network_filter": [],
                     "response": "effect",
                     "factors": {},
                     "random_slope_time": True,
@@ -432,8 +433,16 @@ def validate_config(config):
             raise ValueError("group.roi_lmm.contrasts must not contain duplicates.")
         if not isinstance(roi_lmm.get("factors", {}), dict):
             raise ValueError("group.roi_lmm.factors must be an object.")
-        if str(roi_lmm.get("aggregation", "networks")).strip().lower() != "networks":
-            raise ValueError("group.roi_lmm.aggregation must be 'networks'.")
+        aggregation = str(roi_lmm.get("aggregation", "networks")).strip().lower()
+        if aggregation not in {"networks", "individual"}:
+            raise ValueError("group.roi_lmm.aggregation must be 'networks' or 'individual'.")
+        network_filter = roi_lmm.get("network_filter", [])
+        if isinstance(network_filter, str):
+            network_filter = [network_filter]
+        if not isinstance(network_filter, list) or not all(
+            isinstance(network, str) and network.strip() for network in network_filter
+        ):
+            raise ValueError("group.roi_lmm.network_filter must be a network name or list of names.")
         if str(roi_lmm.get("response", "effect")).strip().lower() != "effect":
             raise ValueError("group.roi_lmm.response must be 'effect'.")
         for setting in ("random_slope_time", "fdr_correction"):

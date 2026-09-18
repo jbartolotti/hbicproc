@@ -12,11 +12,14 @@ def render_roi_lmm_report(result: dict[str, Any], output_path: str | Path) -> Pa
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
+    unit_label = "ROI" if result.get("aggregation") == "individual" else "Network"
     network_rows = []
     network_sections = []
     for network in result["networks"]:
         interaction = network["interaction"]
+        display_name = network.get("unit", network["network"])
         network_rows.append({
+            unit_label.lower(): display_name,
             "network": network["network"],
             "n_subjects": network["n_subjects"],
             "model_type": network.get("model_type", network["random_effects"]),
@@ -55,7 +58,7 @@ def render_roi_lmm_report(result: dict[str, Any], output_path: str | Path) -> Pa
             ]
         )
         network_sections.append(
-            f"<section><h2>{html.escape(network['network'])}</h2>"
+            f"<section><h2>{html.escape(str(display_name))}</h2>"
             "<h3>Model Diagnostics</h3>"
             f"<p>Model type: <code>{html.escape(network.get('model_type', network['random_effects']))}</code>; "
             f"converged: {html.escape(str(network.get('converged', False)))}</p>"
@@ -107,12 +110,12 @@ def render_roi_lmm_report(result: dict[str, Any], output_path: str | Path) -> Pa
                 f'alt="{html.escape(network["network"])} interaction plot"></p></section>'
             )
         )
-    table = pd.DataFrame(network_rows).to_html(index=False) if network_rows else "<p>No estimable networks.</p>"
+    table = pd.DataFrame(network_rows).to_html(index=False) if network_rows else "<p>No estimable ROI units.</p>"
     content = (
         "<html><head><meta charset='utf-8'><title>ROI longitudinal mixed-effects analysis</title></head><body>"
-        f"<h1>ROI longitudinal mixed-effects analysis</h1>"
+            f"<h1>ROI longitudinal mixed-effects analysis</h1>"
         f"<p>Contrast: {html.escape(result['contrast'])}; atlas: {html.escape(result['atlas'])}; "
-        f"subjects: {result['n_subjects']}; networks: {result['n_networks']}</p>"
+            f"subjects: {result['n_subjects']}; units: {result.get('n_units', result.get('n_networks', 0))}</p>"
         f"<h2>Methods and Analysis Summary</h2>"
         f"<p>Formula: <code>{html.escape(result['model_formula'])}</code>; "
         f"group coding: control={result['group_coding']['control']}, intervention={result['group_coding']['intervention']}; "
@@ -120,7 +123,7 @@ def render_roi_lmm_report(result: dict[str, Any], output_path: str | Path) -> Pa
         "<p>Fixed-effect statistics are Wald tests from statsmodels MixedLM. "
         "Reported p-values are the model's Wald-test p-values. These may differ from "
         "lmerTest Satterthwaite or Kenward-Roger approximations commonly reported in R.</p>"
-        f"<h2>Network Interactions</h2>{table}"
+        f"<h2>{unit_label} Interactions</h2>{table}"
         f"{''.join(network_sections)}"
         "</body></html>"
     )

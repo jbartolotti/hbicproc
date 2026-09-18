@@ -9,6 +9,7 @@ from pipeline.processing.group.roi_lmm_model import (
     fit_network_lmm,
 )
 from pipeline.processing.group.roi_lmm_report import render_roi_lmm_report
+from pipeline.processing.group.roi_lmm import _roi_values
 
 from pipeline.processing.group.voxelwise_lme import build_3dlmer_command, build_afni_data_table
 
@@ -141,9 +142,47 @@ def test_roi_lmm_configuration_requires_analysis_inputs() -> None:
     })
     validate_config(config)
 
+    individual = _apply_defaults({
+        "group": {
+            "roi_lmm": {
+                "enabled": True,
+                "task": "nback",
+                "atlas": "schaefer200",
+                "contrasts": ["memory"],
+                "aggregation": "individual",
+                "network_filter": "frontoparietal",
+                "factors": {"group": {}, "time": {}},
+            }
+        }
+    })
+    validate_config(individual)
+
     invalid = _apply_defaults({"group": {"roi_lmm": {"enabled": True}}})
     with pytest.raises(ValueError, match="task"):
         validate_config(invalid)
+
+
+def test_roi_lmm_can_preserve_parcels_and_filter_networks() -> None:
+    summaries = pd.DataFrame([
+        {"subject": "001", "session": "BL", "parcel_id": 1, "parcel_label": "ROI1", "network": "Frontoparietal", "effect": 1.0},
+        {"subject": "001", "session": "BL", "parcel_id": 2, "parcel_label": "ROI2", "network": "Visual", "effect": 3.0},
+        {"subject": "002", "session": "BL", "parcel_id": 1, "parcel_label": "ROI1", "network": "Frontoparietal", "effect": 2.0},
+    ])
+
+    networks = _roi_values(summaries, {}, network_filter="frontoparietal")
+    individual = _roi_values(
+        summaries,
+        {},
+        aggregation="individual",
+        network_filter="frontoparietal",
+    )
+
+    assert networks[["subject", "network", "effect"]].to_dict("records") == [
+        {"subject": "001", "network": "Frontoparietal", "effect": 1.0},
+        {"subject": "002", "network": "Frontoparietal", "effect": 2.0},
+    ]
+    assert individual["unit"].tolist() == ["ROI1", "ROI1"]
+    assert individual["parcel_id"].tolist() == [1, 1]
 
 
 def test_voxelwise_lme_builds_afni_table_and_command(tmp_path) -> None:

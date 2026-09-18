@@ -234,6 +234,10 @@ group:
     task: nback
     atlas: schaefer200
     contrasts: [2back_gt_1back]
+    # Use individual to fit one model per parcel instead of one per network.
+    aggregation: networks
+    # Empty uses all networks; for example: [frontoparietal]
+    network_filter: []
     factors:
       group:
         source: participants.tsv

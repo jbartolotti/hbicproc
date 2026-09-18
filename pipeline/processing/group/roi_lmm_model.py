@@ -33,7 +33,7 @@ def fit_network_lmm(
     random_slope_time: bool = True,
     network_name: str = "unknown",
 ) -> dict[str, Any]:
-    """Fit ``effect ~ group * time + (1 + time | subject)`` for one network."""
+    """Fit ``effect ~ group * time + (1 + time | subject)`` for one ROI unit."""
 
     required = {"subject", "group", "time", "effect"}
     missing = sorted(required.difference(data.columns))
@@ -193,7 +193,7 @@ def fit_network_lmm(
 
 
 def apply_interaction_fdr(results: list[dict[str, Any]], alpha: float = 0.05) -> list[dict[str, Any]]:
-    """Apply BH FDR to interaction p-values across networks."""
+    """Apply BH FDR to interaction p-values across ROI units."""
 
     valid = [(index, result["interaction"].get("p_value")) for index, result in enumerate(results)]
     valid = [(index, float(p_value)) for index, p_value in valid if p_value is not None and np.isfinite(p_value)]
