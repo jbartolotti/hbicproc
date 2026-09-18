@@ -24,9 +24,7 @@ def run(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
     results = {}
     group_mask = get_group_mask(config, _reference_image(config))
     one_sample = group.get("one_sample", {})
-    logger.info("checking one_sample for decision manifest")
     if isinstance(one_sample, dict) and one_sample.get("enabled", False):
-        logger.info("loading manifest")
         decision_manifest = _decision_manifest(config, one_sample, "group.one_sample")
         one_sample_kwargs = {"decision_manifest": decision_manifest}
         if group_mask is not None:

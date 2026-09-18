@@ -57,15 +57,19 @@ def _select_records(
         before_decisions = selected.copy()
         selected = select_records(selected, decision_manifest.population)
         removed = before_decisions.loc[~before_decisions["path"].isin(selected["path"])]
-        print(
-            f"[group] decision population for '{decision_manifest.analysis_id}': "
-            f"{len(selected)}/{len(before_decisions)} maps retained"
+        logger.info(
+            "Decision population for '%s': %d/%d maps retained",
+            decision_manifest.analysis_id,
+            len(selected),
+            len(before_decisions),
         )
         for record in removed.itertuples(index=False):
-            print(
-                "[group] excluded map: "
-                f"subject={record.subject} session={record.session or 'n/a'} "
-                f"run={getattr(record, 'run', None) or 'n/a'} path={record.path}"
+            logger.debug(
+                "Excluded map: subject=%s session=%s run=%s path=%s",
+                record.subject,
+                record.session or "n/a",
+                getattr(record, "run", None) or "n/a",
+                record.path,
             )
     selected["session"] = selected["session"].fillna("n/a").astype(str)
     selected["task"] = selected["task"].fillna("n/a").astype(str)
