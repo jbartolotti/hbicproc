@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from typing import Any
+import logging
 
 from .activation import run_activation
 from .dmn import run_dmn
 from .one_sample import run_one_sample
 from ...decisions import load_configured_decisions
 
+logger = logging.getLogger(__name__)
 
 def run(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
     """Run configured group analyses over existing subject-level derivatives."""
@@ -19,7 +21,9 @@ def run(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
 
     results = {}
     one_sample = group.get("one_sample", {})
+    logger.info("checking one_sample for decision manifest")
     if isinstance(one_sample, dict) and one_sample.get("enabled", False):
+        logger.info("loading manifest")
         decision_manifest = _decision_manifest(config, one_sample, "group.one_sample")
         results["one_sample"] = run_one_sample(
             config,
@@ -52,6 +56,7 @@ def _decision_manifest(
     config: dict[str, Any], specification: dict[str, Any], field_name: str
 ):
     decision_id = str(specification.get("decision", "")).strip()
+    logger.info("decision_manifest function")
     if not decision_id:
         return None
     decisions = load_configured_decisions(config)
