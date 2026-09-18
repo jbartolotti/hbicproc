@@ -149,6 +149,18 @@ def _apply_defaults(config):
             "mask": {
                 "source": "",
                 "gm_probability_threshold": 0.2,
+                },
+                "roi_lmm": {
+                    "enabled": False,
+                    "task": "",
+                    "atlas": "",
+                    "contrasts": [],
+                    "aggregation": "networks",
+                    "response": "effect",
+                    "factors": {},
+                    "random_slope_time": True,
+                    "fdr_correction": True,
+                    "alpha": 0.05,
             }
         }
     }
@@ -381,11 +393,44 @@ def validate_config(config):
         raise ValueError("group.one_sample.task must not be empty when provided.")
     if "decision" in one_sample and not str(one_sample["decision"]).strip():
         raise ValueError("group.one_sample.decision must not be empty when provided.")
-    for analysis_name in ("activation", "dmn"):
+    for analysis_name in ("activation", "dmn", "roi_lmm"):
         analysis_specification = group.get(analysis_name, {})
         if isinstance(analysis_specification, dict) and "decision" in analysis_specification:
             if not str(analysis_specification["decision"]).strip():
                 raise ValueError(f"group.{analysis_name}.decision must not be empty when provided.")
+    roi_lmm = group.get("roi_lmm", {})
+    if not isinstance(roi_lmm, dict):
+        raise ValueError("group.roi_lmm must be an object.")
+    if not isinstance(roi_lmm.get("enabled", False), bool):
+        raise ValueError("group.roi_lmm.enabled must be a boolean.")
+    if roi_lmm.get("enabled", False):
+        for field in ("task", "atlas"):
+            if not str(roi_lmm.get(field, "")).strip():
+                raise ValueError(f"group.roi_lmm.{field} must not be empty when enabled.")
+        contrasts = roi_lmm.get("contrasts", [])
+        if isinstance(contrasts, str):
+            contrasts = [contrasts]
+        if not isinstance(contrasts, list) or not contrasts or not all(
+            isinstance(contrast, str) and contrast.strip() for contrast in contrasts
+        ):
+            raise ValueError("group.roi_lmm.contrasts must be a non-empty list of names.")
+        if len({contrast.strip() for contrast in contrasts}) != len(contrasts):
+            raise ValueError("group.roi_lmm.contrasts must not contain duplicates.")
+        if not isinstance(roi_lmm.get("factors", {}), dict):
+            raise ValueError("group.roi_lmm.factors must be an object.")
+        if str(roi_lmm.get("aggregation", "networks")).strip().lower() != "networks":
+            raise ValueError("group.roi_lmm.aggregation must be 'networks'.")
+        if str(roi_lmm.get("response", "effect")).strip().lower() != "effect":
+            raise ValueError("group.roi_lmm.response must be 'effect'.")
+        for setting in ("random_slope_time", "fdr_correction"):
+            if not isinstance(roi_lmm.get(setting, True), bool):
+                raise ValueError(f"group.roi_lmm.{setting} must be a boolean.")
+        try:
+            alpha = float(roi_lmm.get("alpha", 0.05))
+        except (TypeError, ValueError):
+            raise ValueError("group.roi_lmm.alpha must be between 0 and 1.") from None
+        if not 0 < alpha < 1:
+            raise ValueError("group.roi_lmm.alpha must be between 0 and 1.")
     sessions = one_sample.get("sessions", [])
     if isinstance(sessions, str):
         sessions = [sessions]

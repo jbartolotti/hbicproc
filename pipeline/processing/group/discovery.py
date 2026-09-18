@@ -92,3 +92,39 @@ def discover_atlas_activation_summaries(
     if not records:
         return pd.DataFrame()
     return pd.concat(records, ignore_index=True)
+
+
+def discover_atlas_contrast_summaries(
+    derivatives_root: str | Path,
+    *,
+    task: str,
+    atlas: str,
+    contrast: str | None = None,
+) -> pd.DataFrame:
+    """Discover long-format atlas contrast summaries for a configured task."""
+
+    root = Path(derivatives_root)
+    task_component = _bids_component(task)
+    atlas_component = _bids_component(atlas)
+    pattern = f"**/*_task-{task_component}*_desc-atlas-{atlas_component}-contrasts.tsv"
+    records = []
+    for path in sorted(root.glob(pattern)):
+        subject, session, _, _ = _entities(path)
+        if subject is None:
+            continue
+        table = pd.read_csv(path, sep="\t")
+        required = {"parcel_id", "parcel_label", "network", "hemisphere", "contrast", "effect"}
+        missing = sorted(required.difference(table.columns))
+        if missing:
+            raise ValueError(f"Atlas contrast summary '{path}' is missing columns: {missing}.")
+        if contrast is not None:
+            table = table.loc[table["contrast"].astype(str) == str(contrast)].copy()
+        if table.empty:
+            continue
+        table["subject"] = subject
+        table["session"] = session
+        table["source_path"] = str(path)
+        records.append(table)
+    if not records:
+        return pd.DataFrame()
+    return pd.concat(records, ignore_index=True)

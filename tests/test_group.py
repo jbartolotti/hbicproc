@@ -7,7 +7,7 @@ import pytest
 
 from pipeline.processing.group.activation import run_activation
 from pipeline.processing.group.atlas_metadata import AtlasMetadata
-from pipeline.processing.group.discovery import discover_effect_maps
+from pipeline.processing.group.discovery import discover_atlas_contrast_summaries, discover_effect_maps
 from pipeline.processing.group.inference import InferenceResult, create_inference_method
 from pipeline.processing.group.one_sample import _montages, run_one_sample
 from pipeline.processing.group.participants import add_factor_columns, load_participants
@@ -42,6 +42,30 @@ def test_group_derivative_discovery_and_participant_session_join(tmp_path: Path)
     assert joined.loc[0, "group"] == "intervention"
     assert joined.loc[0, "session"] == "baseline"
     assert joined.loc[0, "path"] == map_path
+
+
+def test_atlas_contrast_summary_discovery_preserves_entities_and_filters_contrast(tmp_path: Path) -> None:
+    path = (
+        tmp_path / "sub-001" / "ses-W12" / "func" / "task-nback" / "analyses" / "activation"
+        / "sub-001_ses-W12_task-nback_desc-atlas-schaefer200-contrasts.tsv"
+    )
+    path.parent.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {"parcel_id": 1, "parcel_label": "parcel", "network": "Default", "hemisphere": "LH", "contrast": "memory", "effect": 1.5},
+            {"parcel_id": 1, "parcel_label": "parcel", "network": "Default", "hemisphere": "LH", "contrast": "other", "effect": 2.5},
+        ]
+    ).to_csv(path, sep="\t", index=False)
+
+    records = discover_atlas_contrast_summaries(
+        tmp_path, task="nback", atlas="schaefer200", contrast="memory"
+    )
+
+    assert len(records) == 1
+    assert records.loc[0, "subject"] == "001"
+    assert records.loc[0, "session"] == "W12"
+    assert records.loc[0, "effect"] == 1.5
+    assert records.loc[0, "source_path"] == str(path)
 
 
 def test_atlas_metadata_selects_network_without_parcel_numbers() -> None:

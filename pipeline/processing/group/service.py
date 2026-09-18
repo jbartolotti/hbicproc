@@ -8,6 +8,7 @@ from .activation import run_activation
 from .dmn import run_dmn
 from .masks import get_group_mask
 from .one_sample import run_one_sample
+from .roi_lmm import run_roi_lmm
 from ...decisions import load_configured_decisions
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,13 @@ def run(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
             config,
             dmn,
             decision_manifest=_decision_manifest(config, dmn, "group.dmn"),
+        )
+    roi_lmm = group.get("roi_lmm", {})
+    if isinstance(roi_lmm, dict) and roi_lmm.get("enabled", False):
+        results["roi_lmm"] = run_roi_lmm(
+            config,
+            roi_lmm,
+            decision_manifest=_decision_manifest(config, roi_lmm, "group.roi_lmm"),
         )
     return {
         "success": True,
