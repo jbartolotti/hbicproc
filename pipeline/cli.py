@@ -291,7 +291,10 @@ def main(argv=None):
         return 0
 
     config = _load_config(args.config)
-    setup_logging(config["logging"]["level"])
+    setup_logging(
+        config["logging"]["level"],
+        config["logging"]["dependency_level"],
+    )
     logger.info("HBICPROC started")
     logger.info(f"Logging level: {config['logging']['level']}")
 

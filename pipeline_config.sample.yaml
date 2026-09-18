@@ -9,6 +9,7 @@ log_dir: ""                   # Log directory. Empty uses <study_root>/logs.
 
 logging:
   level: INFO                 # Console logging level: DEBUG, INFO, WARNING, or ERROR.
+  dependency_level: INFO     # Dependency/root logging level; package logging uses level above.
 
 decisions:
   # Investigator-authored analysis decision manifests. Paths are relative to this file.

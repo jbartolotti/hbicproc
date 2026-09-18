@@ -46,7 +46,8 @@ def _apply_defaults(config):
         "email": "",
         "log_dir": "",
         "logging": {
-            "level": "INFO"
+            "level": "INFO",
+            "dependency_level": "INFO",
         },
         "decisions": {},
         "tokens": {
@@ -214,6 +215,10 @@ def validate_config(config):
     if logging_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
         raise ValueError("logging.level must be one of: DEBUG, INFO, WARNING, ERROR.")
     logging_config["level"] = logging_level
+    dependency_level = str(logging_config.get("dependency_level", "INFO")).strip().upper()
+    if dependency_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+        raise ValueError("logging.dependency_level must be one of: DEBUG, INFO, WARNING, ERROR.")
+    logging_config["dependency_level"] = dependency_level
 
     analysis = config.get("analysis")
     if not isinstance(analysis, dict):
