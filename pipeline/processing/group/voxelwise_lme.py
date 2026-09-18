@@ -51,15 +51,13 @@ def build_3dlmer_command(
     if mask is not None:
         command.extend(["-mask", str(mask)])
     command.extend([
-        "-model", "Group*Time",
-        "-ranEff", "~1|Subj",
-        "-num_glt", "3",
-        "-gltLabel", "1", "Group",
-        "-gltCode", "1", "Group : 1*intervention -1*control",
-        "-gltLabel", "2", "Time",
-        "-gltCode", "2", "Time : 1*followup -1*baseline",
-        "-gltLabel", "3", "GroupXTime",
-        "-gltCode", "3", "Group : 1*intervention -1*control Time : 1*followup -1*baseline",
+        "-model", "'Group*Time+(1|Subj)'",
+        "-gltCode", "control 'Group : 1*control'",
+        "-gltCode", "intervention 'Group : 1*intervention'",
+        "-gltCode", "baseline 'Time : 1*baseline'",
+        "-gltCode", "followup 'Time : 1*followup'",                                
+        "-gltCode", "intervention-control 'Group : 1*intervention -1*control'",
+        "-gltCode", "followup-baseline 'Time : 1*followup -1*baseline'",
         "-dataTable", f"@{data_table}",
     ])
     return command
